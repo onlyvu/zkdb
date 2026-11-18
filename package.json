@@ -1,0 +1,6 @@
+{
+  "name": "zkdb",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "engines": { "node": ">=20" }
+}

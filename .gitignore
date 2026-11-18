@@ -1,0 +1,12 @@
+node_modules/
+circuits/target/*
+contracts/out/
+contracts/cache/
+.env
+dist/
+*.local
+# Proving times measured by a local server; the public Fuji file is committed explicitly.
+packages/dashboard/server/proof-meta/*.json
+# The compiled circuits are committed so the demo runs without the Noir toolchain.
+!circuits/target/batch.json
+!circuits/target/claim.json

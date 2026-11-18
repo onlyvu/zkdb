@@ -1,0 +1,8 @@
+[package]
+name = "claim"
+type = "bin"
+authors = ["zkDB"]
+
+[dependencies]
+zkdb = { path = "../zkdb" }
+poseidon = { tag = "v0.4.0", git = "https://github.com/noir-lang/poseidon" }

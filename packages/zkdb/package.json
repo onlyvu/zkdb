@@ -1,0 +1,28 @@
+{
+  "name": "@zkdb/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./prover": "./src/prover.ts",
+    "./claim-prover": "./src/claim-prover.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "gen:vectors": "tsx scripts/gen-vectors.ts",
+    "gen:fixture": "tsx scripts/gen-batch-fixture.ts && tsx scripts/gen-claim-fixture.ts"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "5.0.0",
+    "@noir-lang/noir_js": "1.0.0-rc.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

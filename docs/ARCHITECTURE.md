@@ -3,7 +3,7 @@
 zkDB has five parts:
 
 - two Noir circuits: one says what a valid batch of changes is, one lets a member prove a fact about their own row;
-- contracts on Avalanche that queue changes, verify proofs, hold the root, gate perks and relay the root over ICM;
+- contracts on Avalanche that queue changes, verify proofs, hold the root, gate perks and relay the root over ICM to our own L1, which sends claim receipts back;
 - a TypeScript core that mirrors the circuit;
 - an API server that proves batches and relays claims;
 - a React dashboard.
@@ -35,8 +35,17 @@ flowchart LR
     BV["BatchVerifier.sol"]
     Gate["PointsGate.sol"]
     CV["ClaimVerifier.sol"]
-    Relay["RootRelay.sol"]
+    Relay["RootRelay.sol<br/>to Dispatch"]
+    RelayL1["RootRelay.sol<br/>to zkdb L1"]
+    Registry["ClaimRegistry.sol"]
     TP1["TeleporterMessenger"]
+  end
+  subgraph School["zkdb L1 (own, chainId 510102)"]
+    TP3["TeleporterMessenger"]
+    MirrorL1["RootMirror.sol"]
+    GateL1["PointsGate.sol"]
+    CVL1["ClaimVerifier.sol"]
+    Fwd["ClaimForwarder.sol"]
   end
   subgraph Dispatch["Dispatch L1 (Fuji)"]
     TP2["TeleporterMessenger"]
@@ -66,6 +75,16 @@ flowchart LR
   Relay -->|"sendCrossChainMessage"| TP1
   TP1 -.->|"ICM, public relayer"| TP2
   TP2 -.->|"receiveTeleporterMessage"| Mirror
+  RelayL1 -->|"root(), batchCount()"| ZkDB
+  RelayL1 -->|"sendCrossChainMessage"| TP1
+  TP1 -.->|"ICM, team relayer"| TP3
+  TP3 -->|"receiveTeleporterMessage"| MirrorL1
+  Fwd -->|"claim(...)"| GateL1
+  GateL1 -->|"root()"| MirrorL1
+  GateL1 -->|"verify"| CVL1
+  Fwd -->|"sendCrossChainMessage"| TP3
+  TP3 -.->|"ICM, team relayer"| TP1
+  TP1 -->|"receiveTeleporterMessage"| Registry
 ```
 
 ### What the browser trusts
@@ -77,6 +96,7 @@ flowchart LR
 | `/api/proofs/meta` | "Proved in" and "Confirmed in" | Display only. Nothing is verified with it |
 | The API server | making batch proofs; relaying claims | It can refuse or delay. It cannot change a result: the contract checks the ops against its own queue and the proof against its own root |
 | The other L1's RPC | "Received by Teleporter on Dispatch, not executed (receiver not deployed)" next to a relayed root | Display only |
+| The zkdb L1 | the mirrored root, claims checked on the L1 | `ClaimRegistry` on Fuji trusts receipts that Teleporter delivers from `ClaimForwarder` on the zkdb L1, i.e. it trusts that L1's validator set (one validator today). The receipts name the root they were checked against, which anyone can compare with `ZkDB` root history on Fuji |
 
 ## Award, prove, verify
 
@@ -246,7 +266,44 @@ sequenceDiagram
 
 Deployed and working: everything up to Teleporter on Dispatch receiving the message. It is received by Teleporter on Dispatch and not executed, because the receiver is not deployed; nothing on Dispatch stores or uses the root. Not deployed: `RootMirror` itself, and a `PointsGate` beside it. Both are tested with a mock messenger (`contracts/test/RootRelay.t.sol`), including a real claim accepted by a gate that reads only the mirrored root. The mirror's address is fixed in advance (first contract of a dedicated deployer key), so `RootRelay` already sends to it. `npm run deploy:mirror -w @zkdb/dashboard -- --simulate` runs Teleporter's `retryMessageExecution` for the latest stored root as an `eth_call` with `RootMirror`'s code placed at that address, which succeeds; without `--simulate` the script deploys the mirror and the gate once that key has gas on Dispatch, then retries the stored message for real.
 
-### An L1 for a group of universities (designed, not deployed)
+## The school L1 (zkdb): root in, claim receipt out (deployed)
+
+`zkdb` is our own Avalanche L1 on Fuji (chainId 510102, token ZKD, subnetID `23UCnnKWGoJTeAf1Uzqjo5RBvoyJ2sYQ7UMqviBcTuYqUJPL97`, blockchainID `272pDkC2CtfGT5kMktHTCNi7homXticaHaf1bJyfkgk5BLzTiU`): Subnet-EVM, converted to a sovereign L1 on 21 Nov 2026, proof of authority with one validator on a team laptop, 30M gas per block. Since a network upgrade on 21 Nov 2026 (unix 1795199165) two precompiles are on: TxAllowList (only wallets the school enabled can send) and ContractDeployerAllowList (only the school deploys); see [l1/README.md](../l1/README.md) and the live demo in [l1-permissions.md](l1-permissions.md). The team's icm-relayer carries Teleporter messages both ways for free (zero fee). Runs and transaction hashes: [l1-run.md](l1-run.md).
+
+```mermaid
+sequenceDiagram
+  participant T as Treasurer key (Fuji)
+  participant RR as RootRelay (C-Chain)
+  participant TC as Teleporter (C-Chain)
+  participant X as team ICM relayer
+  participant TL as Teleporter (zkdb L1)
+  participant RM as RootMirror (L1)
+  participant R as Claim relayer (L1, pays ZKD)
+  participant F as ClaimForwarder (L1)
+  participant G as PointsGate (L1)
+  participant CR as ClaimRegistry (C-Chain)
+
+  T->>RR: relay()
+  RR->>TC: sendCrossChainMessage(zkdb L1, mirror, (batchNo, root))
+  TC-->>X: Warp message
+  X->>TL: receiveCrossChainMessage
+  TL->>RM: receiveTeleporterMessage: only Teleporter, only C-Chain + RootRelay, only a newer batch
+  Note over TL: MessageExecuted
+  R->>F: claimAndForward(proof, perk, nullifier, pickup)
+  F->>G: claim(...): proof checked against RootMirror.root(), nullifier spent
+  F->>TL: sendCrossChainMessage(C-Chain, registry, (perk, nullifier, pickup, threshold, root, batchNo))
+  TL-->>X: Warp message signed by the L1 validator
+  X->>TC: receiveCrossChainMessage
+  TC->>CR: receiveTeleporterMessage: only Teleporter, only zkdb L1 + ClaimForwarder, nullifier once per perk
+  Note over TC: MessageExecuted
+  T->>CR: redeem(perk, pickup code), once
+```
+
+Each side names a contract on the other side before it exists. The L1 addresses follow from the L1 deployer's nonce (no one else sends from it there), so `deploy:l1` puts `RootRelay` and `ClaimRegistry` on Fuji first, pointing at the predicted `RootMirror` and `ClaimForwarder`, then deploys the L1 contracts in nonce order and checks they landed there. The same `ClaimVerifier` as on Fuji fits the L1 (15.7 KB runtime, 3.45M gas to deploy); a claim through `ClaimForwarder` costs about 1.0M gas on the L1. Tests: `contracts/test/L1Claim.t.sol` (one mock messenger per chain: both directions, wrong sender, wrong source chain, direct call, duplicate nullifier, bad proof, receive gas under the limit).
+
+Why this L1: the school runs the validator and holds the fee token, so students never pay AVAX; claims are checked and nullifiers spent on the school chain; the root and the receipts move over ICM so any Avalanche chain can honour a claim. The ledger itself stays on the C-Chain in this deployment. The allow-lists keep free ZKD gas from becoming free block space or fake perk gates for strangers. Not there yet: a fee manager, more than one validator, a public RPC. The dashboard's School L1 page (`src/l1view.tsx`) reads both Fuji ends of the link (RootRelay events, ClaimRegistry receipts and redemptions), since the L1 RPC is not public.
+
+### An L1 for a group of universities (the next step; one school's L1 is deployed, above)
 
 | Question | Design |
 |---|---|
@@ -280,6 +337,8 @@ Deployed and working: everything up to Teleporter on Dispatch receiving the mess
 | `ClaimVerifier.sol` | 15,726 | generated |
 | `RootRelay.sol` | 1,517 | last relayed batch |
 | `RootMirror.sol` | 931 | root and batch number on the other L1 |
+| `ClaimForwarder.sol` | 2,402 | nothing: checks a claim through the gate and sends the receipt |
+| `ClaimRegistry.sol` | 2,259 | claim receipts from the L1, used nullifiers, pickup states |
 
 `submitBatch` costs 1.0 to 1.16 M gas whether the batch has 1 op or 14, because the verifier's work is fixed by the circuit ([benchmarks.md](benchmarks.md), [gas-comparison.md](gas-comparison.md)).
 

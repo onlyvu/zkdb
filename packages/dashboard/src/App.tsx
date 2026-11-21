@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Admin } from './admin';
 import { Perks } from './perks';
+import { SchoolL1 } from './l1view';
+import { useSchoolL1, type SchoolL1State } from './schoolL1';
 import { rolesOf } from './roles';
 import { useIcmDeliveries } from './useIcm';
 import { readConfig, type ChainConfig, type Snapshot } from './chain';
@@ -42,7 +44,7 @@ function NotConfigured() {
 /** One name everywhere: zkDB. What it is here, a points ledger, sits beside it in small type. */
 const Logo = () => <a className="logo" href="#overview">zkDB<small>points ledger</small></a>;
 
-const NAV: [string, string][] = [['overview', 'Overview'], ['members', 'Members'], ['ops', 'Activity'], ['batches', 'Proofs'], ['perks', 'Perks'], ['admin', 'Manage']];
+const NAV: [string, string][] = [['overview', 'Overview'], ['members', 'Members'], ['ops', 'Activity'], ['batches', 'Proofs'], ['perks', 'Perks'], ['l1', 'School L1'], ['admin', 'Manage']];
 
 function useRoute(): string {
   const read = () => location.hash.slice(1) || 'overview';
@@ -66,7 +68,8 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
   const meta = useProofMeta(snapshot?.batchCount);
   const deliveries = useIcmDeliveries(cfg.icm, snapshot?.relays ?? []);
   const priceRef = usePriceRef(cfg);
-  const nav = NAV.filter(([id]) => id !== 'perks' || cfg.gate);
+  const l1 = useSchoolL1(cfg.rpcUrl, cfg.l1, cfg.logRange);
+  const nav = NAV.filter(([id]) => (id !== 'perks' || cfg.gate) && (id !== 'l1' || cfg.l1));
 
   return (
     <>
@@ -103,7 +106,7 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
             <p className="note mono">Reading {cfg.network ?? 'the chain'}…</p>
           </section>
         )}
-        {snapshot && <Page route={route} s={snapshot} stale={stale} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} auth={auth} onSignIn={() => setSigningIn(true)} onChanged={refresh} onRecheck={recheck} />}
+        {snapshot && <Page route={route} s={snapshot} stale={stale} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} l1={l1} auth={auth} onSignIn={() => setSigningIn(true)} onChanged={refresh} onRecheck={recheck} />}
       </main>
 
       {signingIn && snapshot && <SignInDialog cfg={cfg} s={snapshot} auth={auth} onClose={() => setSigningIn(false)} />}
@@ -111,12 +114,13 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
   );
 }
 
-function Page({ route, s, stale, cfg, meta, deliveries, priceRef, auth, onSignIn, onChanged, onRecheck }: { route: string; s: Snapshot; stale: boolean; cfg: ChainConfig; meta: ProofMetaMap; deliveries: Record<string, Delivery>; priceRef?: PriceRef; auth: Auth; onSignIn: () => void; onChanged: () => void; onRecheck: () => Promise<number> }) {
+function Page({ route, s, stale, cfg, meta, deliveries, priceRef, l1, auth, onSignIn, onChanged, onRecheck }: { route: string; s: Snapshot; stale: boolean; cfg: ChainConfig; meta: ProofMetaMap; deliveries: Record<string, Delivery>; priceRef?: PriceRef; l1: { data?: SchoolL1State; error?: string }; auth: Auth; onSignIn: () => void; onChanged: () => void; onRecheck: () => Promise<number> }) {
   const [view, arg] = route.split('/');
   const id = Number(arg);
   switch (view) {
     case 'batches': return <Batches s={s} cfg={cfg} meta={meta} deliveries={deliveries} />;
     case 'batch': return <BatchDetail s={s} batchNo={id} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} />;
+    case 'l1': return cfg.l1 ? <SchoolL1 s={s} cfg={cfg} data={l1.data} error={l1.error} /> : null;
     case 'perks': return <Perks s={s} cfg={cfg} wallet={auth.wallet} onChanged={onChanged} />;
     case 'ops': return <Ops s={s} />;
     case 'op': return <OpDetail s={s} id={id} />;

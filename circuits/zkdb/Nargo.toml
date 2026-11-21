@@ -1,7 +1,7 @@
 [package]
 name = "zkdb"
 type = "lib"
-authors = ["zkDB"]
+authors = ["Vu Viet Anh"]
 
 [dependencies]
 poseidon = { tag = "v0.4.0", git = "https://github.com/noir-lang/poseidon" }

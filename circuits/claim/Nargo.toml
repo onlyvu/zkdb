@@ -1,7 +1,7 @@
 [package]
 name = "claim"
 type = "bin"
-authors = ["zkDB"]
+authors = ["Vu Viet Anh"]
 
 [dependencies]
 zkdb = { path = "../zkdb" }

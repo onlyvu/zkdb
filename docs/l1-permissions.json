@@ -1,0 +1,121 @@
+{
+  "at": "2026-11-20T18:30:43.167Z",
+  "chainId": 510102,
+  "members": {
+    "admin": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+    "claimRelayer": "0x05441C5f1B367b6818064f6AA2c8a88d5906Ec2d",
+    "outsider": "0x2cC649f2d93bF4b7d8Fb031D00B155171e99a77E",
+    "newDeployer": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2",
+    "newRelayer": "0x23EE128A4b37D06124E7c7625d2267604236F7Cc",
+    "clubGate": "0xa48b6bcf320514f3e355d92aae0d58ed33302bca"
+  },
+  "steps": [
+    {
+      "step": "outsider sends 1 wei of ZKD",
+      "who": "outsider",
+      "address": "0x2cC649f2d93bF4b7d8Fb031D00B155171e99a77E",
+      "result": "refused",
+      "detail": "cannot issue transaction from non-allow listed address: 0x2cC649f2d93bF4b7d8Fb031D00B155171e99a77E"
+    },
+    {
+      "step": "outsider deploys a PointsGate",
+      "who": "outsider",
+      "address": "0x2cC649f2d93bF4b7d8Fb031D00B155171e99a77E",
+      "result": "refused",
+      "detail": "cannot issue transaction from non-allow listed address: 0x2cC649f2d93bF4b7d8Fb031D00B155171e99a77E"
+    },
+    {
+      "step": "claim relayer (tx-enabled) deploys a PointsGate",
+      "who": "claim relayer",
+      "address": "0x05441C5f1B367b6818064f6AA2c8a88d5906Ec2d",
+      "result": "refused",
+      "detail": "tx.origin 0x05441C5f1B367b6818064f6AA2c8a88d5906Ec2d is not authorized to deploy a contract"
+    },
+    {
+      "step": "admin sends 20 ZKD to the new school deployer",
+      "who": "school admin",
+      "address": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+      "result": "ok",
+      "tx": "0x58207b65edcd7a17f264b6c813a5ae6c9e4068809b83b60ffa92a25094556075",
+      "detail": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2"
+    },
+    {
+      "step": "admin sends 20 ZKD to the new claim relayer",
+      "who": "school admin",
+      "address": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+      "result": "ok",
+      "tx": "0x6193b4e695347f895d8c8fa5ddbbe8e2dd70eb4a203a2fe803e9d8ca5496c2db",
+      "detail": "0x23EE128A4b37D06124E7c7625d2267604236F7Cc"
+    },
+    {
+      "step": "new claim relayer sends before it is enabled",
+      "who": "new claim relayer",
+      "address": "0x23EE128A4b37D06124E7c7625d2267604236F7Cc",
+      "result": "refused",
+      "detail": "cannot issue transaction from non-allow listed address: 0x23EE128A4b37D06124E7c7625d2267604236F7Cc"
+    },
+    {
+      "step": "admin: TxAllowList.setEnabled(new school deployer)",
+      "who": "school admin",
+      "address": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+      "result": "ok",
+      "tx": "0x217a99e6136acc91c9b1f784ac616cab8d92de0e0605711b4888b7607a9eeaeb",
+      "detail": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2"
+    },
+    {
+      "step": "admin: ContractDeployerAllowList.setEnabled(new school deployer)",
+      "who": "school admin",
+      "address": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+      "result": "ok",
+      "tx": "0x3f3d0a1827e63fadba072a5d9d151f5f6a8ac6dd92a539e8d50f5a76a8d865f2",
+      "detail": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2"
+    },
+    {
+      "step": "admin: TxAllowList.setEnabled(new claim relayer)",
+      "who": "school admin",
+      "address": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+      "result": "ok",
+      "tx": "0x91f0179a5650c00cd9a150c380df6413110233870255a44cc49de3cd7bcde944",
+      "detail": "0x23EE128A4b37D06124E7c7625d2267604236F7Cc"
+    },
+    {
+      "step": "new school deployer deploys a PointsGate (club #2)",
+      "who": "new school deployer",
+      "address": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2",
+      "result": "ok",
+      "tx": "0x75261f834725d6e1708daaf270be5ae6aa43d51ebc805b97c490075da7d9f775",
+      "detail": "0xa48b6bcf320514f3e355d92aae0d58ed33302bca"
+    },
+    {
+      "step": "new school deployer adds a perk (at least 300 points)",
+      "who": "new school deployer",
+      "address": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2",
+      "result": "ok",
+      "tx": "0x35e1835e0cb7bfbd5b2063bac37d262e2156950952bbbf0d48c84320241dddce",
+      "detail": ""
+    },
+    {
+      "step": "new claim relayer sends a transaction",
+      "who": "new claim relayer",
+      "address": "0x23EE128A4b37D06124E7c7625d2267604236F7Cc",
+      "result": "ok",
+      "tx": "0x5e789fc919579506f6e5bf93808a573fbbf9325bd39c6b36c0a499269eb2ec22",
+      "detail": ""
+    },
+    {
+      "step": "admin: ContractDeployerAllowList.setNone(new school deployer)",
+      "who": "school admin",
+      "address": "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+      "result": "ok",
+      "tx": "0xabc8b72efebf2cdc77f921bb2749a46ce1992d44af2d9e2f7f535d8ca96e2391",
+      "detail": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2"
+    },
+    {
+      "step": "new school deployer deploys again",
+      "who": "new school deployer",
+      "address": "0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2",
+      "result": "refused",
+      "detail": "tx.origin 0xab491c9A89D89e97939A286b41C8DFFdf06Ec8c2 is not authorized to deploy a contract"
+    }
+  ]
+}

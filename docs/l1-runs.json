@@ -1,0 +1,208 @@
+{
+  "deployment": [
+    {
+      "chain": "fuji",
+      "what": "RootRelay (ZkDB root to the zkdb L1)",
+      "address": "0x1335af7535aee69c7253f22dea3b6b214891f6e5",
+      "tx": "0xe1093fc1b00ee1abf1f483de1bfef35f65a70414f140c502de79450448c34156",
+      "gas": 383828
+    },
+    {
+      "chain": "fuji",
+      "what": "ClaimRegistry (claim receipts from the L1)",
+      "address": "0xfab45908d9309ee508fa4e9a79437f47e1396d38",
+      "tx": "0x4714a4921aaea9a07c063cb34c75565ab6b3867af74c625b3ad7d5b184f386d6",
+      "gas": 544180
+    },
+    {
+      "chain": "l1",
+      "what": "RootMirror",
+      "address": "0x744e2be19b816f280e35ae441e6ba51f7b5d4c78",
+      "tx": "0xdd279ca67374c4f6c92826e511da2352951d677d33dd8a22407f058b1d8e260b",
+      "gas": 257034
+    },
+    {
+      "chain": "l1",
+      "what": "ClaimVerifier (UltraHonk, claim circuit)",
+      "address": "0xa469888cdfa2ffad68a9babbd92d29d95c577c36",
+      "tx": "0x3cc37378e40d964a7fa2ca4bc6044292f67be6b7af5ca020e5d31dbc806a5ed9",
+      "gas": 3453175
+    },
+    {
+      "chain": "l1",
+      "what": "PointsGate (reads RootMirror)",
+      "address": "0xcc825630337f42d757537e19250e7051cf6a0a67",
+      "tx": "0xe8e44c6de231309aa241aab692dc1463043ef9d0cd6484aa2fe797ceca4df116",
+      "gas": 852800
+    },
+    {
+      "chain": "l1",
+      "what": "ClaimForwarder",
+      "address": "0xc1e48ee74410eab7508da2e1227d26afb8721686",
+      "tx": "0x4c8c7b709d259e53ed5a275962d46493260fd844fca9cba60696f6b2196a7b39",
+      "gas": 580063
+    }
+  ],
+  "runs": [
+    {
+      "at": "2026-11-20T17:47:08.724Z",
+      "root": {
+        "batchNo": 6,
+        "root": "0x23cbc89f0ded0e1855054dbf5f6733a8f6eb43a42d5c808f1e9f6f0229c28b4a",
+        "messageId": "0x23c7324138a352f8d971bff743cd37556e0e9b63e21d7f3a7ad3c618458fa2b7",
+        "sendTx": "0x5530c4ace93cae3a5e22eddb9f4f4f682559f410ec700fd51b3ec90d239acd3c",
+        "receiveTx": "0x05a63212958754b866837ea9ad228cc67488e8e786e090353b8de92715305750",
+        "status": "executed",
+        "deliveredMs": 1508
+      },
+      "mirror": {
+        "batchNo": 6,
+        "root": "0x23cbc89f0ded0e1855054dbf5f6733a8f6eb43a42d5c808f1e9f6f0229c28b4a"
+      },
+      "claim": {
+        "perkId": 1,
+        "perk": "Volunteer certificate",
+        "minPoints": 250,
+        "provingMs": 257,
+        "nullifier": "0x0e189a13288469e52f49cb86edfbc9c6b1ed8728f39c0491ed7b6c82068a15bd",
+        "messageId": "0x31c88a3de6841410b1ea201d519d49698c430ef559ab23d5c44bbe9865349386",
+        "sendTx": "0xcc926e33928a8cc872df8a230351ef39a13fdc8256bf0b280f5688c631ed2f83",
+        "receiveTx": "0xade15d1cec499bd54ce83865b86498e315d93d38c16ea8d58a23d7b7cebcfcae",
+        "status": "executed",
+        "deliveredMs": 5584
+      },
+      "redeemTx": "0x9a570a9fab146f0cc792e267f0f366ca8bb6e65a9cfeecf87f69d2f8d6554f06",
+      "registryCount": 1,
+      "txs": [
+        {
+          "chain": "fuji",
+          "what": "send root #6 to zkdb L1 over ICM",
+          "hash": "0x5530c4ace93cae3a5e22eddb9f4f4f682559f410ec700fd51b3ec90d239acd3c",
+          "gas": "161297",
+          "ms": 2333
+        },
+        {
+          "chain": "l1",
+          "what": "claim perk #1 on the L1 and send the receipt",
+          "hash": "0xcc926e33928a8cc872df8a230351ef39a13fdc8256bf0b280f5688c631ed2f83",
+          "gas": "1029495",
+          "ms": 264
+        },
+        {
+          "chain": "fuji",
+          "what": "redeem the perk on Fuji with the pickup code",
+          "hash": "0x9a570a9fab146f0cc792e267f0f366ca8bb6e65a9cfeecf87f69d2f8d6554f06",
+          "gas": "29551",
+          "ms": 1581
+        }
+      ]
+    },
+    {
+      "at": "2026-11-20T17:48:34.468Z",
+      "root": {
+        "batchNo": 7,
+        "root": "0x261bbd4cb6894c499943e78faf9b33dbe8ac6b01aa5b71b0332ae4db102635f3",
+        "messageId": "0xcc390eaa94faaf3e97f893ca4e275db3be6779e8a38534c740557a153bcc261c",
+        "sendTx": "0x49b977f507ad8177944dddcc47b33660f34bafb949e973dd682aa96cf5da550f",
+        "receiveTx": "0x9cb9ffd550eb14a2795a03da7c4c1c51a9ef6d659c316c67c45c0b926fd91214",
+        "status": "executed",
+        "deliveredMs": 4
+      },
+      "mirror": {
+        "batchNo": 7,
+        "root": "0x261bbd4cb6894c499943e78faf9b33dbe8ac6b01aa5b71b0332ae4db102635f3"
+      },
+      "claim": {
+        "perkId": 1,
+        "perk": "Volunteer certificate",
+        "minPoints": 250,
+        "provingMs": 187,
+        "nullifier": "0x0e579a69c5ecaa3c242a7fdba07d9415862f80da7f3f85bd195d4217835dee8b",
+        "messageId": "0x3ca789f467d1960457b7cfedec7352eb55bad8003dedab1df8f8c4d65fe1e622",
+        "sendTx": "0xbaa489dab7b4084d376026d726724f5b2ee020de846baa6672847bd588d17e49",
+        "receiveTx": "0xb69902046ef18bcd591b38a823805cfe90e96a6170069db94eb82e53abc8439e",
+        "status": "executed",
+        "deliveredMs": 3770
+      },
+      "redeemTx": "0x2f95848c329952305b4a98fbffb2425039106a4264d070ba89d3d8fcc618c0f7",
+      "registryCount": 2,
+      "txs": [
+        {
+          "chain": "fuji",
+          "what": "send root #7 to zkdb L1 over ICM",
+          "hash": "0x49b977f507ad8177944dddcc47b33660f34bafb949e973dd682aa96cf5da550f",
+          "gas": "176707",
+          "ms": 2877
+        },
+        {
+          "chain": "l1",
+          "what": "claim perk #1 on the L1 and send the receipt",
+          "hash": "0xbaa489dab7b4084d376026d726724f5b2ee020de846baa6672847bd588d17e49",
+          "gas": "995307",
+          "ms": 264
+        },
+        {
+          "chain": "fuji",
+          "what": "redeem the perk on Fuji with the pickup code",
+          "hash": "0x2f95848c329952305b4a98fbffb2425039106a4264d070ba89d3d8fcc618c0f7",
+          "gas": "29539",
+          "ms": 2232
+        }
+      ]
+    },
+    {
+      "at": "2026-11-20T18:32:13.056Z",
+      "root": {
+        "batchNo": 8,
+        "root": "0x2ad7842826368adb896fcd0701b7cfee369789afe18a6628b221f264001b24d2",
+        "messageId": "0x1209ae601714d071bcbbaa0648b8423f7f5c4eebb7b9e54481c45578184b426c",
+        "sendTx": "0x81d13b6c4dc9f0b717279bf141fd6330723c9621be460381d6a1409a487d44fc",
+        "receiveTx": "0xfd7e0c122321603ec7c3b67693431da9676d744558ce270c1acf896c34cd0b0c",
+        "status": "executed",
+        "deliveredMs": 1508
+      },
+      "mirror": {
+        "batchNo": 8,
+        "root": "0x2ad7842826368adb896fcd0701b7cfee369789afe18a6628b221f264001b24d2"
+      },
+      "claim": {
+        "relayer": "0x23EE128A4b37D06124E7c7625d2267604236F7Cc",
+        "perkId": 1,
+        "perk": "Volunteer certificate",
+        "minPoints": 250,
+        "provingMs": 206,
+        "nullifier": "0x21e823b783000ad774638b723cca09f7f2af501a34fe81c1e720fdd552a2486c",
+        "messageId": "0x2c466c916c0a2ca20257c5b8158d4c4df947b0e4fbf833d63ee8134f2258ce5a",
+        "sendTx": "0x4a2344dc68efe65ee016cbaf249c381f78279b5bcdc80ff984ad1c2b55cb77d5",
+        "receiveTx": "0x222511e3ad45f3ff720af25122e8c94697e1bf843d94ba16b95bec275623485d",
+        "status": "executed",
+        "deliveredMs": 9004
+      },
+      "redeemTx": "0x0d7b005d5fda8551610a2218d1d2b09262e63e6e5454304ff0c0e34c196aa2cc",
+      "registryCount": 3,
+      "txs": [
+        {
+          "chain": "fuji",
+          "what": "send root #8 to zkdb L1 over ICM",
+          "hash": "0x81d13b6c4dc9f0b717279bf141fd6330723c9621be460381d6a1409a487d44fc",
+          "gas": "159607",
+          "ms": 2930
+        },
+        {
+          "chain": "l1",
+          "what": "claim perk #1 on the L1 and send the receipt",
+          "hash": "0x4a2344dc68efe65ee016cbaf249c381f78279b5bcdc80ff984ad1c2b55cb77d5",
+          "gas": "995223",
+          "ms": 263
+        },
+        {
+          "chain": "fuji",
+          "what": "redeem the perk on Fuji with the pickup code",
+          "hash": "0x0d7b005d5fda8551610a2218d1d2b09262e63e6e5454304ff0c0e34c196aa2cc",
+          "gas": "29551",
+          "ms": 2905
+        }
+      ]
+    }
+  ]
+}

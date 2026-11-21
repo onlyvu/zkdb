@@ -1,0 +1,28 @@
+{
+ "precompileUpgrades": [
+  {
+   "txAllowListConfig": {
+    "blockTimestamp": 1795199165,
+    "adminAddresses": [
+     "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+     "0x7855c958eC2e104D358aBAd285b50e7C759547F9"
+    ],
+    "enabledAddresses": [
+     "0x05441c5f1b367b6818064f6aa2c8a88d5906ec2d",
+     "0x474044236309DC089A92c5AB9A3daF853831F1DC",
+     "0xba3a4947c8760Ea682a8cFf159cd82512F6D9ea4",
+     "0x8117DF62D48DA08AB3681967b59D0f10401C48e7"
+    ]
+   }
+  },
+  {
+   "contractDeployerAllowListConfig": {
+    "blockTimestamp": 1795199165,
+    "adminAddresses": [
+     "0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab",
+     "0x7855c958eC2e104D358aBAd285b50e7C759547F9"
+    ]
+   }
+  }
+ ]
+}

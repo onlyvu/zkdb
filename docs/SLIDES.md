@@ -7,7 +7,7 @@ Ten slides, text ready to paste. Every number is from the README or `docs/`, whi
 **zkDB**
 A points ledger for student clubs where nobody can take a point away alone, and a member can prove "I have 500 points" without showing their card.
 
-Avalanche Fuji · UniHack 2026
+Avalanche Fuji · UniHack 2026 · Vu Viet Anh
 
 ## 2. The problem
 
@@ -64,7 +64,7 @@ Buyer: a university's student-affairs office or its Đoàn and Hội, paying in 
 
 ## 8. Vietnamese law
 
-- Crypto is not legal tender; payments are in VND. zkDB takes no payments and points are not crypto assets.
+- Crypto is not a lawful means of payment (State Bank of Vietnam); the crypto-asset pilot (Nghị quyết 05/2025/NQ-CP) keeps trading and payment in VND. zkDB takes no payments and issues no token; points cannot be bought, sold or moved.
 - Personal data (Luật 91/2025/QH15, Nghị định 356/2025): only card numbers, balances, reason codes and hashes go on-chain. Names and student IDs stay with the club.
 - *Điểm rèn luyện* is decided by each school under Thông tư 40/2026. zkDB is a record a club can show; it does not replace the decision.
 
@@ -74,14 +74,15 @@ Buyer: a university's student-affairs office or its Đoàn and Hội, paying in 
 - Balances are public. The claim hides which qualifying card claimed, nothing more.
 - One signer can still award points and add a member. Both are public and name the signer.
 - The receiving contract on Dispatch is not deployed. One prover server.
-- The batch circuit and first contract were written on 16 Oct 2026, before the event (the organiser FAQ at team1vn.xyz: "Can I bring a project I am already building?" Yes). Everything else was built 2 to 19 Nov.
+- Built when: the batch circuit, its verifier, the tree and a first contract (1,308 hand-written lines) were committed on 16 Oct 2026, before the event (the organiser FAQ at team1vn.xyz: "Can I bring a project I am already building?" Yes). From 2 Nov: 8,869 lines, the claim circuit, PointsGate, ICM relay, the app and every Fuji deployment (`./scripts/built-when.sh`).
 
-## 10. Maintainer and links
+## 10. Author and links
 
-[onlyvu (Vu Viet Anh)](https://github.com/onlyvu)
+Vu Viet Anh
 
-- [GitHub repository](https://github.com/onlyvu/zkdb)
+- Repo: github.com/onlyvu/zkdb
 - ZkDB `0x1dd3f88db29ee55e66b8db243c99c5b7fc0ea91c`
 - PointsGate `0xe68736b7dc375a90635dec5b07e09838f4fc4c33`
 - RootRelay `0x497e8189dc2d2cc07712f448f51fbe708e2e306f`
-- All five contracts are source-verified on Snowtrace (Routescan). 185 tests: 48 Foundry, 30 core, 78 dashboard, 29 Noir.
+- The main flow, run on Fuji on 20 Nov 2026: 13 transactions in docs/fuji-flow-run.md
+- All five contracts are source-verified on Snowtrace (Routescan). 197 tests: 54 Foundry, 30 core, 84 dashboard, 29 Noir.

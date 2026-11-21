@@ -1,12 +1,29 @@
 # zkDB
 
-A points ledger for student clubs. A balance cannot change without a permanent public record of who signed it, taking points away (a redemption or a correction) needs two signers, and a member can prove "I have at least 500 points" without revealing which card is theirs. Every batch of changes is checked by a validity proof (a SNARK) that a contract on Avalanche verifies.
+zkDB is a points ledger for student clubs and the schools that score them: every change to a balance is a permanent public record naming its signer, taking points away needs two signers, and a member can prove "I have at least 500 points" without revealing which card is theirs. Every batch of changes is checked by a validity proof (a SNARK) that a contract on Avalanche verifies.
 
-**Slides:** _link added before submission_ · **Video (2 to 3 min):** _link added before submission_
+**Slides:** _link added before submission_ · **Video (2 to 3 min):** _link added before submission_ · **Author:** Vu Viet Anh
+
+Perk claims run on the school's own Avalanche L1 `zkdb`, where only wallets the school enabled can send transactions or deploy contracts (TxAllowList and ContractDeployerAllowList, [l1/](l1/README.md)); proven roots go to it and claim receipts come back to the Fuji C-Chain over ICM, and the dashboard's School L1 page lists both ([screenshot](docs/media/school-l1.png)).
+
+| Proof (21 Nov 2026, after the allow-list upgrade) | Sent | Received and executed |
+|---|---|---|
+| Fuji → L1: proven root #8 to RootMirror | [0x81d13b6c…](https://testnet.snowtrace.io/tx/0x81d13b6c4dc9f0b717279bf141fd6330723c9621be460381d6a1409a487d44fc) (Fuji) | `0xfd7e0c12…` on the L1, `MessageExecuted` |
+| L1 → Fuji: ZK claim checked on the L1, sent by a claim relayer the school enabled that night | `0x4a2344dc…` on the L1 | [0x222511e3…](https://testnet.snowtrace.io/tx/0x222511e3ad45f3ff720af25122e8c94697e1bf843d94ba16b95bec275623485d) (Fuji), `MessageExecuted` in ClaimRegistry |
+| Permissions: an outsider holding ZKD is refused; the admin enables a new deployer and claim relayer, who then deploy and send; the deployer is offboarded and refused again | [docs/l1-permissions.md](docs/l1-permissions.md) (`npm run perms:l1`) | node errors and L1 hashes |
+| The L1 exists, is converted, has its validator; its genesis is [l1/genesis.json](l1/genesis.json) | P-Chain `getSubnet`, `getCurrentValidators`, `getTx` ([commands](l1/README.md#check-it)) | |
+
+Earlier runs (roots #6 and #7 and their receipts, before the upgrade): [docs/l1-run.md](docs/l1-run.md). Limits: one validator on a team laptop, localhost L1 RPC, PoA owner is a team key, validator balance topped up daily.
+
+- Live on Avalanche Fuji: seven source-verified contracts ([addresses](#live-on-avalanche-fuji)) and four on the zkdb L1. On 21 Nov 2026 `npm run flow:fuji` ran the whole main flow again in [13 transactions](docs/fuji-flow-run.md), among them a [batch proof](https://testnet.snowtrace.io/tx/0xcebc3545b2f47098ed497398b220421921279a79791491ac56de382de54aa7af) that applied a co-signed correction and rejected an overspend and a [zero-knowledge perk claim](https://testnet.snowtrace.io/tx/0x8231674ec8e657f119ec98d2f6a88097a7643395f6defa622204c8df8e04c814); `npm run flow:l1` then sent that root to the L1 and a claim receipt back (table above).
+- Tests: 54 contract, 30 core, 84 dashboard and 29 circuit tests; all four commands exited 0 on 21 Nov 2026 ([commands](#tests)).
+- Built when: the proof engine (the 16-change batch circuit, the Merkle tree, a first `ZkDB.sol`: 1,308 hand-written lines) was committed on 16 Oct 2026, before the event. The other 8,869 hand-written lines, the claim circuit, ICM, the whole app and every Fuji deployment came from 2 Nov on. [Exact split](#built-when).
 
 ![On Avalanche Fuji: a correction and an overspend proposed by the treasurer, co-signed by the auditor, proven; then a perk claim that hides the card](docs/media/demo.gif)
 
 The GIF was recorded against the Fuji deployment below on 19 Nov 2026 (1280 × 720 viewport, demo test accounts, seeded club). The treasurer proposes cutting card #0889 from 550 to 55 and a redemption of 500 points from a card that has 150; the auditor co-signs both; one proof applies the correction and rejects the overspend; a member proves "at least 500 points" without naming the card; a card with too few points gets "No proof exists"; the proof page shows the root was received on Dispatch and not executed.
+
+**Keywords:** zero-knowledge proofs · Noir · UltraHonk verifier on-chain · verifiable database (every batch of writes proven) · two-signer corrections · private "at least N points" claims with nullifiers · điểm rèn luyện (student conduct points) · own Avalanche L1 `zkdb` · ICM / Teleporter · TxAllowList · ContractDeployerAllowList · Fuji
 
 ## The problem
 
@@ -37,16 +54,21 @@ The new regulation asks for results that are "khách quan, công bằng, công k
 | BatchVerifier (UltraHonk, batch circuit) | [`0xf5100724394b96775a74950452e6565f78c7ec5d`](https://testnet.snowtrace.io/address/0xf5100724394b96775a74950452e6565f78c7ec5d) | yes |
 | PointsGate (perks by zero-knowledge claim) | [`0xe68736b7dc375a90635dec5b07e09838f4fc4c33`](https://testnet.snowtrace.io/address/0xe68736b7dc375a90635dec5b07e09838f4fc4c33) | yes |
 | ClaimVerifier (UltraHonk, claim circuit) | [`0xa6728051568ccf503e57ee5ba579a7ae8a4ab4a5`](https://testnet.snowtrace.io/address/0xa6728051568ccf503e57ee5ba579a7ae8a4ab4a5) | yes |
-| RootRelay (sends each root over ICM) | [`0x497e8189dc2d2cc07712f448f51fbe708e2e306f`](https://testnet.snowtrace.io/address/0x497e8189dc2d2cc07712f448f51fbe708e2e306f) | yes |
+| RootRelay (sends each root over ICM to Dispatch) | [`0x497e8189dc2d2cc07712f448f51fbe708e2e306f`](https://testnet.snowtrace.io/address/0x497e8189dc2d2cc07712f448f51fbe708e2e306f) | yes |
+| RootRelay (sends each root over ICM to the zkdb L1) | [`0x1335af7535aee69c7253f22dea3b6b214891f6e5`](https://testnet.snowtrace.io/address/0x1335af7535aee69c7253f22dea3b6b214891f6e5) | yes |
+| ClaimRegistry (claim receipts from the zkdb L1) | [`0xfab45908d9309ee508fa4e9a79437f47e1396d38`](https://testnet.snowtrace.io/address/0xfab45908d9309ee508fa4e9a79437f47e1396d38) | yes |
+
+On the zkdb L1 (RPC on the validator only, so no explorer link): RootMirror `0x744e2be19b816f280e35ae441e6ba51f7b5d4c78`, ClaimVerifier `0xa469888cdfa2ffad68a9babbd92d29d95c577c36` (the same UltraHonk verifier, 3.45M gas to deploy, under the 30M block limit), PointsGate `0xcc825630337f42d757537e19250e7051cf6a0a67` (reads RootMirror), ClaimForwarder `0xc1e48ee74410eab7508da2e1227d26afb8721686`. Deploy transactions: [docs/l1-run.md](docs/l1-run.md).
 
 "Verified" means source-verified on Routescan, the explorer behind testnet.snowtrace.io. This is the third deployment; the two earlier ones are superseded and the dashboard no longer reads them.
 
-State on 19 Nov 2026: 8 members, 28 changes, 5 proofs, 8 co-signed changes (3 corrections, 5 redemptions), 2 perk claims. 5 roots sent over ICM: each was received by Teleporter on Dispatch and not executed, because the receiving contract is not deployed there (see Why Avalanche: ICM). Check it yourself:
+State on 21 Nov 2026: 11 members, 46 changes, 8 proofs, 17 co-signed changes (6 corrections, 11 redemptions), 5 perk claims on the Fuji gate. 8 roots sent to Dispatch: each was received by Teleporter there and not executed, because the receiving contract is not deployed on Dispatch. 3 roots sent to the zkdb L1 and 3 claim receipts sent back: all executed (see Why Avalanche: ICM). Check it yourself:
 
 ```bash
 RPC=https://avalanche-fuji-c-chain-rpc.publicnode.com
-cast call 0x1dd3f88db29ee55e66b8db243c99c5b7fc0ea91c "batchCount()(uint64)" --rpc-url $RPC   # 5 or more
-cast call 0x1dd3f88db29ee55e66b8db243c99c5b7fc0ea91c "head()(uint64)" --rpc-url $RPC         # 28 or more
+cast call 0x1dd3f88db29ee55e66b8db243c99c5b7fc0ea91c "batchCount()(uint64)" --rpc-url $RPC   # 8 or more
+cast call 0x1dd3f88db29ee55e66b8db243c99c5b7fc0ea91c "head()(uint64)" --rpc-url $RPC         # 46 or more
+cast call 0xfab45908d9309ee508fa4e9a79437f47e1396d38 "count()(uint256)" --rpc-url $RPC       # claim receipts from the L1: 3 or more
 cast call 0xe68736b7dc375a90635dec5b07e09838f4fc4c33 "perk(uint256)((uint256,uint64,uint64,string))" 0 --rpc-url $RPC
 ```
 
@@ -63,7 +85,7 @@ Transactions worth opening:
 | Root #3 sent over ICM from the C-Chain | [0xfb2051b1…](https://testnet.snowtrace.io/tx/0xfb2051b1c2b29a87cff8f313e7dd1a6f2f5cdddba3e6266578d86837d6224832) |
 | Teleporter on Dispatch receives it and cannot execute it (`MessageExecutionFailed`: no contract at the destination) | [0x6488cdb7…](https://subnets-test.avax.network/dispatch/tx/0x6488cdb7f318c9177d0efdba0c1e1fcb2643558b92a43f57e694052436fc9f26) |
 
-All 41 seeding transactions with gas, fee and confirmation time: [docs/fuji-measurements.md](docs/fuji-measurements.md).
+All 41 seeding transactions with gas, fee and confirmation time: [docs/fuji-measurements.md](docs/fuji-measurements.md). The 13 transactions of the 20 Nov run of the main flow: [docs/fuji-flow-run.md](docs/fuji-flow-run.md).
 
 | | |
 |---|---|
@@ -77,7 +99,7 @@ All 41 seeding transactions with gas, fee and confirmation time: [docs/fuji-meas
 2. Take away, with two signatures. To redeem points or overwrite a balance the treasurer calls `proposeChange`. The op enters the queue only when the table's auditor calls `approveChange` with the same op (or `declineChange`).
 3. Prove. A prover takes up to 16 waiting ops from the chain, applies them to a Poseidon2 Merkle tree and makes an UltraHonk proof (Noir circuit, bb.js) that `oldRoot → newRoot` followed the rules. An op that breaks a rule gets `ok = false`, and the proof covers that too.
 4. Verify. `submitBatch` checks the ops against the queue, calls the on-chain verifier and only then stores the new root. Anyone can call it.
-5. Relay. `RootRelay` sends the new root to another Avalanche L1 through Teleporter (ICM).
+5. Relay. `RootRelay` sends the new root to another Avalanche L1 through Teleporter (ICM). On the zkdb L1, `RootMirror` stores it, a `PointsGate` there checks claims against it, and `ClaimForwarder` sends each accepted claim's receipt back to `ClaimRegistry` on the C-Chain.
 6. Check. Any browser rebuilds the database from the public op log and compares roots: *Data verified* or *Data does not match*.
 7. Claim. On the Perks page the member's browser, which holds the card's secret, proves "a card in the current root has at least N points" and makes the claim out to the hash of a one-time pickup code. A relayer sends the proof to `PointsGate`, which checks it against `ZkDB.root()`. A copied proof cannot be redirected: the pickup hash is a public input of the proof, and only the holder of the code can collect the perk at the desk (`collect`).
 
@@ -98,7 +120,7 @@ So gas is not the reason. The proof is there for what a plain contract cannot do
 
 1. Private claims. `PointsGate` accepts "some card in this ledger has at least N points" without learning which card. A plain contract can check a balance only if it is told whose. The claim needs the whole ledger as one Merkle root that a circuit can open cheaply, which means a Poseidon2 tree.
 2. That root is too expensive to keep by hand. Updating a depth-20 Poseidon2 tree inside the EVM takes 40 hashes per change, about 812,000 gas with the cheapest public implementation ([zemse/poseidon2-evm](https://github.com/zemse/poseidon2-evm), 20,304 gas per hash by its own report; calculated, we did not run it). The batch proof keeps the same root correct for 152,731 gas per change.
-3. One root travels. 32 bytes stand for every balance. `RootRelay` sends them towards another L1 over ICM for 144,197 gas, and a gate there could check the same claims with no copy of the ledger and no trust in the club's server. Only the sending half is live today (see below).
+3. One root travels. 32 bytes stand for every balance. `RootRelay` sends them towards another L1 over ICM for 144,197 gas, and a gate there checks the same claims with no copy of the ledger and no trust in the club's server. This runs on our own L1 (see below).
 
 If a club needs none of the three, a plain contract is the better choice. On the words: the batch proof is a validity proof and hides nothing. Only the claim is zero-knowledge.
 
@@ -109,9 +131,9 @@ If a club needs none of the three, a plain contract is the better choice. On the
 | Why on-chain | The party that keeps the points is the party accused when they are wrong. The op log, the signers and the root sit in a contract nobody at the club can edit, and anyone can rebuild every balance from it. |
 | Why Avalanche: speed | A treasurer presses *Prove* and sees *Proof accepted* on the same screen. Over the 41 seeding transactions the median time from broadcast to receipt was 2.5 s (p90 3.0 s, slowest 3.6 s). The two proofs made live from the dashboard confirmed in 2.1 and 2.2 s. |
 | Why Avalanche: cost | A proof is 1.05 to 1.18 M gas; an award is 67,502 gas. On Fuji these cost 160 wei per gas: a 10 wei base fee plus the wallet's 150 wei tip, so a proof cost 0.16 to 0.19 nAVAX. At the C-Chain mainnet base fee on 18 Nov 2026 (7.5 nAVAX, `cast base-fee --rpc-url https://api.avax.network/ext/bc/C/rpc`) a proof would cost about 0.0079 to 0.0088 AVAX and an award 0.0005 AVAX. The mainnet figures are gas × base fee; we did not pay them. |
-| Why Avalanche: ICM | Each proven root is sent from the Fuji C-Chain to the Dispatch L1 through Teleporter. The public relayer carries it over within seconds and Teleporter on Dispatch receives it ([sent](https://testnet.snowtrace.io/tx/0xfb2051b1c2b29a87cff8f313e7dd1a6f2f5cdddba3e6266578d86837d6224832), [received](https://subnets-test.avax.network/dispatch/tx/0x6488cdb7f318c9177d0efdba0c1e1fcb2643558b92a43f57e694052436fc9f26)). It is not executed: the receiving contract, `RootMirror`, is written and tested but not deployed, because we have no gas on Dispatch. Teleporter emits `MessageExecutionFailed` and keeps each message so it can be retried. Nothing on Dispatch stores or uses the root today. `npm run deploy:mirror -w @zkdb/dashboard -- --simulate` asks the Dispatch RPC to run Teleporter's `retryMessageExecution` for the latest stored root with `RootMirror`'s code placed at its address (an `eth_call` state override, no gas): the call succeeds, and without the override it reverts with "destination address has no code". With DIS on the deployer, the same script without `--simulate` deploys `RootMirror`, a `PointsGate` there and retries the stored message for real. |
+| Why Avalanche: ICM | Each proven root goes from the Fuji C-Chain to our own L1 `zkdb` through Teleporter, and each claim accepted there comes back as a receipt. Fuji → L1: `RootRelay` sends the root, the team's ICM relayer delivers it within seconds, and Teleporter on the L1 runs `RootMirror` (`MessageExecuted`). L1 → Fuji: `PointsGate` on the L1 checks a member's zero-knowledge claim against the mirrored root, `ClaimForwarder` sends perk id, nullifier, pickup hash, threshold and root, and Teleporter on Fuji runs `ClaimRegistry` ([received and executed](https://testnet.snowtrace.io/tx/0xb69902046ef18bcd591b38a823805cfe90e96a6170069db94eb82e53abc8439e)), which records each nullifier once per perk; a desk on the C-Chain then redeems the perk with the member's pickup code. Each side accepts messages only from Teleporter, from the other chain's blockchain ID and from the one contract that sends them. `npm run flow:l1 -w @zkdb/dashboard` runs both directions and writes [docs/l1-run.md](docs/l1-run.md). The older relay to the public Dispatch L1 still runs; there the messages are received and not executed, because we have no gas on Dispatch to deploy `RootMirror` (`npm run deploy:mirror -w @zkdb/dashboard -- --simulate` shows it would run). |
 | Why Avalanche: Data API | The dashboard reads sender, block time and fee for the contract's transactions from the Avalanche Data API (Glacier) in one request, and falls back to the RPC. |
-| Own L1 (designed, not deployed) | A consortium of universities runs an Avalanche L1: each school's IT office runs a validator (proof of authority), the transaction allow-list admits only treasurers, auditors and the claim relayer, and gas is a token the consortium hands out, so a student-affairs office pays a hosting bill in VND and nobody buys crypto. Each school's root goes to the C-Chain over ICM as a public anchor and to the other schools, so school B can accept a claim about points earned at school A. What exists today is the relay from the C-Chain to Dispatch. |
+| Own L1 (deployed on Fuji) | `zkdb` (chainId 510102, token ZKD, blockchainID `272pDkC2CtfGT5kMktHTCNi7homXticaHaf1bJyfkgk5BLzTiU`, subnetID `23UCnnKWGoJTeAf1Uzqjo5RBvoyJ2sYQ7UMqviBcTuYqUJPL97`) is a sovereign Avalanche L1 converted on 21 Nov 2026, proof of authority with one validator; P-Chain checks in [l1/README.md](l1/README.md). The school runs the validator and holds the fee token, so a student never buys or pays AVAX: claims on the L1 are sent by the claim relayer, which pays in ZKD. Claims are checked and nullifiers spent on the school chain; the root comes in and receipts go out over ICM, so any Avalanche chain can honour a claim. In this deployment the ledger (ZkDB and its batch proofs) stays on the C-Chain as the public anchor. Since a network upgrade on 21 Nov 2026 only wallets on the TxAllowList can send and only the school can deploy, because free gas for students must not mean free block space or fake perk gates for strangers. What is not there yet: a fee manager, more validators (one consortium school per validator is the plan), a public RPC. |
 | Where the money comes from | No token and no yield. Points have no cash value and cannot be bought, sold or moved. The costs are gas and hosting. The buyer we aim at is a university's student-affairs office (Phòng Công tác sinh viên) or its Đoàn Thanh niên and Hội Sinh viên, paying in VND for the dashboard, the prover and the claim relayer. No school has seen this yet, and we have no price validated with one. |
 
 What a semester would cost in gas for a club of 200 members, from the gas measured on Fuji:
@@ -151,32 +173,59 @@ What is new here is the combination for this use: proven writes, two-signature c
 
 ## Vietnamese law and data
 
-- Crypto is not legal tender in Vietnam and payments are made in VND. zkDB takes no payments. Points are not money or crypto assets, and the only coin involved is test AVAX for gas.
+- Crypto is not a lawful means of payment in Vietnam ([State Bank of Vietnam](https://vnba.org.vn/vi/bitcoin-khong-phai-tien-phap-quy--khong-phai-la-phuong-tien-thanh-toan-hop-phap-tren-dat-nuoc-viet-nam-6822.htm)). The crypto-asset pilot under [Nghị quyết 05/2025/NQ-CP](https://xaydungchinhsach.chinhphu.vn/toan-van-nghi-quyet-so-5-2025-nq-cp-ve-trien-khai-thi-diem-thi-truong-tai-san-ma-hoa-tai-viet-nam-119250909184045221.htm) requires offering, trading and payment in VND through licensed providers, and [Luật 71/2025/QH15](https://english.luatvietnam.vn/lawonthedigitaltechnologyindustryno71-2025-qh15datedjune142025ofthenationalassembly-405695-doc1.html) (in force 1 Jan 2026) treats digital assets as property. zkDB takes no payments and issues no token. Points have no cash value and cannot be bought, sold or transferred, so they are neither money nor a crypto asset. The only coin involved is test AVAX for gas; a school would pay for hosting in VND (see the own-L1 design above).
 - Personal data ([Luật 91/2025/QH15](https://vneconomy.vn/nhung-diem-moi-trong-luat-bao-ve-du-lieu-ca-nhan-tu-112026.htm), in force 1 Jan 2026, and [Nghị định 356/2025/NĐ-CP](https://luatvietan.vn/diem-moi-cua-nghi-dinh-356-2025-so-voi-nghi-dinh-13-2023-ve-huong-dan-bao-ve-du-lieu-ca-nhan.html), which replaced Nghị định 13/2023): nothing personal goes on-chain. On-chain there are card numbers, balances, reason codes and hashes.
 - *Điểm rèn luyện* is set by each school under Thông tư 40/2026. zkDB is a record a club or office can show; it does not replace the official decision.
 
 ## What is real and what is demo setup
 
-- Real: the five contracts on Fuji, every batch proof and claim proof (generated by bb.js, accepted by the on-chain verifiers), all balances and history (read from chain events), gas and fees (from receipts), ICM sends, and Teleporter's receipt of each message on Dispatch (read from Teleporter there; it shows each one as not executed).
+- Real: the seven contracts on Fuji and four on the zkdb L1, every batch proof and claim proof (generated by bb.js, accepted by the on-chain verifiers), all balances and history (read from chain events), gas and fees (from receipts), ICM sends, Teleporter's execution of each root and claim receipt between Fuji and the zkdb L1 (`MessageExecuted` in the receive transaction), and Teleporter's receipt of each message on Dispatch (it shows each one as not executed).
 - Seeded story: the club, the campaign, the card numbers and the reasons. `npm run deploy:fuji` wrote them.
 - Demo card secrets. The seeded cards have random secrets that the deploy script wrote to a gitignored file on the recording laptop (`.demo-cards.fuji.local`); they are not in the repo. With `ZKDB_DEMO=1` the local server offers them as chips on the Perks page so the recording needs no typing. Whoever holds that file can tell which demo card made a claim.
 - Demo accounts (a dev toggle, off by default). Started with `ZKDB_DEMO=1`, the dashboard server offers the test keys from its local env file (gitignored) in the sign-in dialog as Owner, Treasurer and Auditor, and signs for them. Our recordings use this; there is no wallet popup in them. Without the flag the routes do not exist and sign-in is Core or MetaMask (SIWE, no gas); a production build never asks for them. With the flag, the server answers only on its local address, only to the dashboard's own origin with a per-launch token, and the keys sign only this dashboard's sign-in message and a fixed list of calls per role (see the threat model).
 - Claim relayer: a funded test key on the dashboard server pays the gas of claims, capped per hour.
 - One laptop. The owner, treasurer, auditor and relayer test keys all sit in one file on the recording laptop. The two-signer rule is enforced by the contract; in this demo one person holds both keys. In use, the treasurer and the auditor would be different people with their own wallets.
 - Timing: proving time is measured by the server and confirmation time by the browser that sent the proof. They are kept in [`packages/dashboard/server/proof-meta/`](packages/dashboard/server/proof-meta) and are display only.
-- Not deployed: `RootMirror` and a second `PointsGate` on Dispatch (so the ICM messages are received there and not executed), and any L1 of our own.
+- Own L1: `zkdb` is converted on the P-Chain and validated by one avalanchego node on a team laptop; its RPC is localhost only, so L1 transactions in [docs/l1-run.md](docs/l1-run.md) can be checked only on that machine, while every L1 → Fuji receipt lands on Fuji as a Warp message signed by that validator. The claims in `flow:l1` are made by the script with flow-run card secrets, not by a member's browser. The dashboard's School L1 page shows the L1 side from public Fuji data (roots relayed, claims received).
+- Not deployed: `RootMirror` and a second `PointsGate` on Dispatch (so the ICM messages sent there are received and not executed).
 
-## Development timeline
+## Built when
 
-- 16 October 2026. The batch circuit, Poseidon2 tree, TypeScript prover and first on-chain verifier.
-- 2 to 19 November 2026. The points dashboard, wallet sign-in, co-signed corrections, private perk claims and Fuji deployments.
+The dates and counts in this section describe the imported code's development history. This repository starts from a source snapshot and does not contain those historical commit objects. To reproduce the split, run `scripts/built-when.sh` in a checkout that contains that history. The core proof engine was developed before the event. The organiser's FAQ on [team1vn.xyz](https://team1vn.xyz/) answers "Can I bring a project I am already building?" with yes. Every number below comes from `./scripts/built-when.sh 2a051c6`. It counts hand-written lines only, leaving out the bb-generated verifiers, compiled circuits, the lockfile, fixtures and images.
+
+### Before the event
+
+16 Oct 2026: 11 commits (`84dc20a` to `13ddb78`), timestamped between 00:29 and 00:45 that night, adding 34 files and 1,308 lines:
+
+- the Noir circuits for the Poseidon2 Merkle tree, the op rules (insert, set, add, subtract, delete) and the 16-change batch (`circuits/zkdb`, `circuits/batch`);
+- the TypeScript tree, VM, batch builder and batch prover (`packages/zkdb`);
+- a first `ZkDB.sol` (153 lines: queue, writers, `submitBatch`) and its tests;
+- the verifier bb generated for the batch circuit, `BatchVerifier.sol`.
+
+The batch circuit and `BatchVerifier.sol` have not changed since. The BatchVerifier deployed on Fuji is that code.
+
+### During the event
+
+2 to 20 Nov 2026: 42 commits from `20a0d83`, 76 files, +8,869 / −41 lines.
+
+| Area | Lines added | What |
+|---|---:|---|
+| `circuits` | 122 | The zero-knowledge claim circuit ("a card in this root has at least N points"); its verifier is generated |
+| `contracts/src` | 358 | `PointsGate`, `RootRelay`, `RootMirror`; in `ZkDB.sol` the table owners and auditors, co-signed changes, signer in every event and two-step ownership (+125 / −17) |
+| `contracts/test` | 649 | Tests for all of the above |
+| `packages/zkdb` | 259 | Claim builder and claim prover |
+| `packages/dashboard` | 6,325 | The dashboard, wallet sign-in, API server, claim relayer, Data API reader, deploy, seed, gas comparison, pre-record and Fuji flow scripts, and their tests |
+| `docs` | 726 | Architecture, gas comparison, measurements |
+| Other | 430 | README, demo flows, licence, dashboard config, build scripts |
+
+Every Fuji deployment is from the event: the first on 12 Nov, the one in use on 19 Nov. Of the 10,136 hand-written lines at `2a051c6`, 1,267 (12%) still date from 16 Oct (`git blame -w`).
 
 ## Run it
 
 Needs Node 20+ and npm. The local demo also needs [Foundry](https://getfoundry.sh) (`anvil`, `forge`).
 
 ```bash
-git clone https://github.com/onlyvu/zkdb.git && cd zkdb
+git clone https://github.com/onlyvu/zkdb && cd zkdb
 git submodule update --init          # forge-std, for the contracts
 npm ci
 
@@ -188,6 +237,13 @@ npm run fuji -w @zkdb/dashboard      # http://localhost:5173
 npm run prerecord -w @zkdb/dashboard
 ZKDB_DEMO=1 npm run fuji -w @zkdb/dashboard
 
+# Run the main flow once more on Fuji with the test keys and write every tx to docs/fuji-flow-run.md
+npm run flow:fuji -w @zkdb/dashboard
+
+# On the validator machine: ICM both ways with the zkdb L1 (root in, claim receipt out), written to docs/l1-run.md
+npm run deploy:l1 -w @zkdb/dashboard   # once; addresses go to packages/dashboard/.env.l1
+npm run flow:l1 -w @zkdb/dashboard
+
 # Or a fresh local chain with the same story and test accounts
 npm run demo -w @zkdb/dashboard      # anvil on 8559, API on 8788, UI on http://localhost:5173
 ```
@@ -198,11 +254,13 @@ The compiled circuits and both verifiers are committed, so none of this needs th
 
 ## Tests
 
+Counts from a run on 21 Nov 2026; each command exited 0.
+
 | Suite | Count | Command |
 |---|---:|---|
-| Contracts (Foundry, real proof fixtures) | 48 | `cd contracts && forge test` |
+| Contracts (Foundry, real proof fixtures; 6 for ICM with the L1 both ways) | 54 | `cd contracts && forge test` |
 | Core: tree, Poseidon2 vectors, VM, batch prover, claim prover | 30 | `npm test -w @zkdb/core` |
-| Dashboard: replay, points, forms, Data API reader, API and gate on a real anvil chain | 78 | `npm test -w @zkdb/dashboard` |
+| Dashboard: replay, points, forms, Data API reader, School L1 page data, API and gate on a real anvil chain | 84 | `npm test -w @zkdb/dashboard` |
 | Circuits (Noir): 18 tree and op, 2 batch, 9 claim | 29 | `cd circuits && nargo test --workspace` (needs nargo) |
 
 The core suite generates and verifies a real batch proof and a real claim proof. The dashboard suites start anvil and deploy the real contracts; the batch API test submits a committed fixture proof on-chain, the gate test relays committed claim proofs through the server and checks every refusal of the demo-account endpoint (no flag, wrong Host, wrong Origin, no token, a message that is not a sign-in, a call outside the role's list). They are skipped when Foundry is missing. `npm run typecheck` and `npm run build` pass in both packages.
@@ -218,20 +276,22 @@ Benchmarks: [docs/benchmarks.md](docs/benchmarks.md).
 - The dashboard trusts its RPC for completeness of the log. A mismatch shows as *Data does not match*; point `VITE_RPC_URL` at your own node to remove the trust.
 - The owner is one key and can change writers and auditors. Ownership transfer is two-step so it can move to a Safe; it has not.
 - A new circuit means a new verifier and a new `ZkDB` deployment started from the old root. We have not done a migration.
+- The zkdb L1 has one validator on a team laptop, a localhost RPC, a P-Chain balance that needs topping up about once a day, and a PoA owner that is a team key. If the laptop is off, the L1 stops and ICM messages wait.
+- A claim nullifier is per card and perk id, not per gate: the same card claiming perk #0 on the Fuji gate and on the L1 gate shows the same nullifier on both (the card stays hidden; the two claims are linkable).
 
 ## Repository
 
 | Path | What |
 |---|---|
 | `circuits/` | Noir: Poseidon2 Merkle tree, op semantics, the 16-op batch circuit, the claim circuit |
-| `contracts/` | `ZkDB.sol`, `PointsGate.sol`, `icm/RootRelay.sol`, `icm/RootMirror.sol`, generated verifiers, tests |
+| `contracts/` | `ZkDB.sol`, `PointsGate.sol`, `icm/RootRelay.sol`, `icm/RootMirror.sol`, `icm/ClaimForwarder.sol`, `icm/ClaimRegistry.sol`, generated verifiers, tests |
 | `packages/zkdb` | TypeScript mirror of the tree and VM, batch builder, provers |
 | `packages/dashboard` | React dashboard, API server, deploy, demo and measurement scripts |
-| `docs/` | Architecture, design, benchmarks, Fuji measurements, gas comparison |
+| `docs/` | Architecture, design, benchmarks, Fuji measurements, gas comparison, the L1 run |
 | `DEMO_FLOWS.md` | The demo, beat by beat |
 
-## Maintainer
+## Author
 
-[onlyvu (Vu Viet Anh)](https://github.com/onlyvu)
+[Vu Viet Anh](https://github.com/onlyvu)
 
 MIT licence, see [LICENSE](LICENSE).

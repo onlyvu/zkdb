@@ -1,5 +1,6 @@
 {
   "name": "@zkdb/dashboard",
+  "author": "Vu Viet Anh",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +16,11 @@
     "fuji": "tsx scripts/serve.ts fuji",
     "gas:compare": "tsx scripts/gas-compare.ts",
     "deploy:mirror": "tsx scripts/deploy-mirror.ts fuji",
-    "prerecord": "tsx scripts/prerecord.ts fuji"
+    "prerecord": "tsx scripts/prerecord.ts fuji",
+    "flow:fuji": "tsx scripts/flow-fuji.ts",
+    "deploy:l1": "tsx scripts/deploy-l1.ts",
+    "flow:l1": "tsx scripts/flow-l1.ts",
+    "perms:l1": "tsx scripts/perms-l1.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.3.0",

@@ -2,6 +2,7 @@ import { createPublicClient, http, parseAbi, type Address, type Hex } from 'viem
 import type { Op } from '@zkdb/core';
 import { createGlacier } from './glacier';
 import { replay, type BatchEvent, type QueuedOp, type ReplayResult } from './replay';
+import { readSchoolL1Config, type SchoolL1Config } from './schoolL1';
 
 export const zkdbAbi = parseAbi([
   'function root() view returns (bytes32)',
@@ -105,6 +106,8 @@ export interface ChainConfig {
   /** PointsGate: perks claimed with a zero-knowledge proof against the root. */
   gate?: Address;
   icm?: IcmConfig;
+  /** The school's own L1: the Fuji contracts that send it roots and receive its claim receipts. */
+  l1?: SchoolL1Config;
   /** Avalanche Data API base for this chain, e.g. https://data-api.avax.network/v1/chains/43113 */
   dataApi?: string;
   /** A network whose live base fee is used to say what a testnet fee would cost there. */
@@ -132,6 +135,7 @@ export function readConfig(env: Record<string, string | undefined> = import.meta
       name: env.VITE_ICM_NAME || 'another L1',
       explorer: env.VITE_ICM_EXPLORER_URL?.replace(/\/$/, '') || undefined,
     } : undefined,
+    l1: readSchoolL1Config(env),
     dataApi: env.VITE_DATA_API_URL || undefined,
     priceRef: env.VITE_PRICE_REF_RPC_URL ? { name: env.VITE_PRICE_REF_NAME || 'mainnet', rpcUrl: env.VITE_PRICE_REF_RPC_URL } : undefined,
   };

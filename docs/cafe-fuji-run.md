@@ -7,7 +7,7 @@ Café ledger ZkDB [`0xe0cd8ecef235219cae14ced3fea30293932b41d2`](https://testnet
 | Step | Transaction |
 |---|---|
 | card 101 issued (Linh) | [0xf2464004…](https://testnet.snowtrace.io/tx/0xf2464004d7081f91dabc87dc9482747b7aea02040cb7bdd0985df72e03a74be8) |
-| card 102 issued (Minh) | [0x6a5c1dbb…](https://testnet.snowtrace.io/tx/0x6a5c1dbb1d7f90704b7b3f837d60294eb64774f0c684a75db5f754ff5b5ff250) |
+| card 102 issued (Nam) | [0x6a5c1dbb…](https://testnet.snowtrace.io/tx/0x6a5c1dbb1d7f90704b7b3f837d60294eb64774f0c684a75db5f754ff5b5ff250) |
 | stamps written (1/3) | [0x33385330…](https://testnet.snowtrace.io/tx/0x333853309e80ac21cc2f77ba3ad684704a30b31875d20338c95e76ed468dd260) |
 | stamps written (2/3) | [0x266404b4…](https://testnet.snowtrace.io/tx/0x266404b47ae0af8168410584d3dece113b46566aa1909cd11a6b490c1c93f72b) |
 | stamps written (3/3) | [0xd07a3626…](https://testnet.snowtrace.io/tx/0xd07a3626d57c0c112216db7532248ffda9b1d511f37d47cdaa1d83e361d13ae1) |

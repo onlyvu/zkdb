@@ -61,17 +61,17 @@ async function main() {
 
   // Two regulars. Their phones make the secrets.
   const linh = newSecret();
-  const minh = newSecret();
+  const nam = newSecret();
   const a = await newCard(ledger, 101n, linh);
-  const b = await newCard(ledger, 102n, minh);
+  const b = await newCard(ledger, 102n, nam);
   tx('card 101 issued (Linh)', a.txHashes[0]);
-  tx('card 102 issued (Minh)', b.txHashes[0]);
-  const [linhRow, minhRow] = [a.rowIds[0]!, b.rowIds[0]!];
+  tx('card 102 issued (Nam)', b.txHashes[0]);
+  const [linhRow, namRow] = [a.rowIds[0]!, b.rowIds[0]!];
 
-  console.log('A week of coffees: 11 stamps for Linh, 4 for Minh, in one proven batch:');
+  console.log('A week of coffees: 11 stamps for Linh, 4 for Nam, in one proven batch:');
   const week = await ledger.writeBatch([
     { add: { row: linhRow, field: BALANCE_FIELD, amount: 6n } },
-    { add: { row: minhRow, field: BALANCE_FIELD, amount: 4n } },
+    { add: { row: namRow, field: BALANCE_FIELD, amount: 4n } },
     { add: { row: linhRow, field: BALANCE_FIELD, amount: 5n } },
   ]);
   for (const [i, h] of week.queued.txHashes.entries()) tx(`stamps written (${i + 1}/3)`, h);
@@ -85,8 +85,8 @@ async function main() {
   tx('free coffee recorded (card not revealed)', txHash);
   const again = await ledger.checkThreshold(claim);
   console.log(`  The same card again: ${again.valid ? 'valid?!' : `refused (${again.reason})`}`);
-  const minhTry = await ledger.proveThreshold(reward, minh).then(() => 'proved?!', (e) => `no proof exists (${(e as Error).message})`);
-  console.log(`  Minh tries with 4 stamps: ${minhTry}`);
+  const namTry = await ledger.proveThreshold(reward, nam).then(() => 'proved?!', (e) => `no proof exists (${(e as Error).message})`);
+  console.log(`  Nam tries with 4 stamps: ${namTry}`);
 
   if (fuji) {
     const link = (x: string) => `[\`${x}\`](https://testnet.snowtrace.io/address/${x})`;

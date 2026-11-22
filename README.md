@@ -2,8 +2,6 @@
 
 **A points ledger nobody can quietly edit.** Every change to a balance is public and names its signer, taking points away needs two signers, each batch of changes is checked by a validity proof on Avalanche, and a member can prove "I have at least N points" without showing which card is theirs.
 
-[**Live app**](https://zkdb.vuvietanh.com) · [**Try it without a wallet**](https://zkdb.vuvietanh.com/#try) · [**Demo video (2 min)**](docs/media/zkdb-demo.mp4) · [**Slides**](docs/zkdb-pitch.pdf) · [Architecture](docs/ARCHITECTURE.md)
-
 ![zkDB overview: data verified, latest proof, members and activity, read live from Avalanche Fuji](docs/media/overview.png)
 
 | | |
@@ -84,12 +82,6 @@ The video (2:08, Vietnamese narration and subtitles) walks through the live site
 | ![School L1: root in sync, claims checked there, who may write](docs/media/school-l1.png) | ![A proof: slots, gas, proving time, where its root went](docs/media/proof.png) |
 | ![Manage: roles read from the contract, the owner is a 2-of-3 governor](docs/media/manage.png) | ![All proofs with their ICM status](docs/media/proofs.png) |
 
-An earlier recording of the two-signer flow (19 Nov 2026, previous interface):
-
-![On Avalanche Fuji: a correction and an overspend proposed by the treasurer, co-signed by the auditor, proven; then a perk claim that hides the card](docs/media/demo.gif)
-
-The GIF was recorded against the Fuji deployment below on 19 Nov 2026 (1280 × 720 viewport, demo test accounts, seeded club). The treasurer proposes cutting card #0889 from 550 to 55 and a redemption of 500 points from a card that has 150; the auditor co-signs both; one proof applies the correction and rejects the overspend; a member proves "at least 500 points" without naming the card; a card with too few points gets "No proof exists"; the proof page shows the root was received on Dispatch and not executed.
-
 ## Own L1 and ICM
 
 Perk claims run on the school's own Avalanche L1 `zkdb`, where only wallets the school enabled can send transactions or deploy contracts (TxAllowList and ContractDeployerAllowList, [l1/](l1/README.md)); proven roots go to it and claim receipts come back to the Fuji C-Chain over ICM, and the dashboard's School L1 page lists both and reads the L1 itself through its public RPC: the root it holds, each L1 transaction, who is on the allow-lists ([screenshot](docs/media/school-l1.png)).
@@ -161,7 +153,7 @@ Transactions worth opening:
 | Auditor co-signs it | [0xa0547c84…](https://testnet.snowtrace.io/tx/0xa0547c84b5a1e03772022aa2db7e72a88e5483d07fd9cc1a51410a276a1ae2d2) |
 | Zero-knowledge perk claim, made out to a pickup code, 852,392 gas | [0xbf92b577…](https://testnet.snowtrace.io/tx/0xbf92b5772f620a4c2a28a1d088965c456976a69784170e4f21617fbe504bb5be) |
 | The perk handed out at the desk against that pickup code | [0x52d9bfec…](https://testnet.snowtrace.io/tx/0x52d9bfec14f46e9c5cd1875accd07166a120ab0a2288c061dac90adcf2c7ef99) |
-| A claim proved in a browser while recording the GIF, sent by the relayer | [0x69f6e573…](https://testnet.snowtrace.io/tx/0x69f6e57345f34132bd8aab86988e5b0a44b8908a227bdb8636ccfd4a57ec3c6e) |
+| A claim proved in a browser, sent by the relayer | [0x69f6e573…](https://testnet.snowtrace.io/tx/0x69f6e57345f34132bd8aab86988e5b0a44b8908a227bdb8636ccfd4a57ec3c6e) |
 | Root #3 sent over ICM from the C-Chain | [0xfb2051b1…](https://testnet.snowtrace.io/tx/0xfb2051b1c2b29a87cff8f313e7dd1a6f2f5cdddba3e6266578d86837d6224832) |
 | Teleporter on Dispatch receives it and cannot execute it (`MessageExecutionFailed`: no contract at the destination) | [0x6488cdb7…](https://subnets-test.avax.network/dispatch/tx/0x6488cdb7f318c9177d0efdba0c1e1fcb2643558b92a43f57e694052436fc9f26) |
 

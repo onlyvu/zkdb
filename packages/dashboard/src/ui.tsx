@@ -9,13 +9,15 @@ import { EmptyArt } from './art';
 export const K = 16;
 
 /** `page` makes the title the page's headline (serif); otherwise it is a section inside a page. */
-export function Section({ id, title, count, note, actions, page, children }: { id?: string; title: string; count?: number; note?: string; actions?: ReactNode; page?: boolean; children: ReactNode }) {
+/** `note` is for everyone; `techNote` explains the mechanism and shows only with chain details on. */
+export function Section({ id, title, count, note, techNote, actions, page, children }: { id?: string; title: ReactNode; count?: number; note?: ReactNode; techNote?: string; actions?: ReactNode; page?: boolean; children: ReactNode }) {
   return (
     <section id={id} className={page ? 'section page' : 'section'}>
       <div className="section-head">
         <div>
           <h2>{title}{count !== undefined && <span className="count mono">{count}</span>}</h2>
           {note && <p className="note">{note}</p>}
+          {techNote && <p className="note tech-only">{techNote}</p>}
         </div>
         {actions}
       </div>
@@ -48,11 +50,12 @@ export function setExplorer(cfg: ChainConfig) {
 }
 
 /** A hash with a copy button and, when the network has an explorer, a link to it. */
-export function OnChain({ value, kind, full }: { value: string; kind: 'tx' | 'address'; full?: boolean }) {
+/** `always` shows the hash even with chain details off, for pages where the address is the content (Admin). */
+export function OnChain({ value, kind, full, always }: { value: string; kind: 'tx' | 'address'; full?: boolean; always?: boolean }) {
   return (
     <span className="onchain">
-      <Hash value={value} full={full} />
-      {explorer && <a className="link ext" href={`${explorer.url}/${kind}/${value}`} target="_blank" rel="noreferrer">{explorer.name} ↗</a>}
+      <span className={always ? undefined : 'tech-only'}><Hash value={value} full={full} /></span>
+      {explorer && <a className="link ext" href={`${explorer.url}/${kind}/${value}`} target="_blank" rel="noreferrer" title={value}>{explorer.name} ↗</a>}
     </span>
   );
 }
@@ -67,8 +70,8 @@ export function Actor({ s, address, verb }: { s: Snapshot; address?: string; ver
       {verb && <span className="verb">{verb}</span>}
       {role && <b>{role}</b>}
       {explorer
-        ? <a className="addr mono" href={`${explorer.url}/address/${address}`} target="_blank" rel="noreferrer">{short}</a>
-        : <span className="addr mono">{short}</span>}
+        ? <a className={role ? 'addr mono tech-only' : 'addr mono'} href={`${explorer.url}/address/${address}`} target="_blank" rel="noreferrer">{short}</a>
+        : <span className={role ? 'addr mono tech-only' : 'addr mono'}>{short}</span>}
     </span>
   );
 }
@@ -116,20 +119,24 @@ export function SlotLegend({ slots }: { slots: Slot[] }) {
   );
 }
 
-export function Details({ children, label = 'Technical details' }: { children: ReactNode; label?: string }) {
+/**
+ * A labelled block of supporting detail, never folded away. By default it belongs to chain details and shows with
+ * the header switch; `always` keeps it on screen.
+ */
+export function Details({ children, label = 'Technical details', always }: { children: ReactNode; label?: string; always?: boolean }) {
   return (
-    <details className="tech">
-      <summary>{label}</summary>
+    <div className={always ? 'tech' : 'tech tech-only'}>
+      <h3 className="lab">{label}</h3>
       {children}
-    </details>
+    </div>
   );
 }
 
 export const STATUS: Record<OpStatus, string> = { applied: 'Confirmed', failed: 'Rejected', pending: 'Waiting' };
 export const STATUS_HELP: Record<OpStatus, string> = {
-  applied: 'A proof confirmed this change and the contract accepted it.',
-  failed: 'The proof showed this change could not be applied, for example subtracting below zero or editing a deleted row. It had no effect.',
-  pending: 'Recorded on-chain and waiting. It takes effect when the next proof is published.',
+  applied: 'Checked by a proof and in effect.',
+  failed: 'Broke a rule, for example spending more than the balance. It had no effect.',
+  pending: 'Recorded. It takes effect with the next proof.',
 };
 export const OpStatusLabel = ({ status }: { status: OpStatus }) => (
   <span className={`status ${status}`} title={STATUS_HELP[status]}><i aria-hidden="true" />{STATUS[status]}</span>

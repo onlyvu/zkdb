@@ -13,8 +13,8 @@ import type { OpStatus, OpView, RowView } from './replay';
  */
 export const PROGRAM = {
   table: BigInt(import.meta.env?.VITE_PROGRAM_TABLE ?? 1),
-  club: 'CLB Tình nguyện',
-  name: 'Mùa hè xanh 2026',
+  club: 'Volunteer Club',
+  name: 'Green Summer 2026',
   unit: 'points',
 } as const;
 

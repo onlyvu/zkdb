@@ -44,8 +44,9 @@ export function SchoolL1({ s, cfg, data, error, live, wallet, onChanged }: {
   return (
     <>
       <div className="page-title">
-        <h2>School L1, <em>over ICM.</em></h2>
-        <p className="note">{l1.name} · chain {l1.chainId}. Roots go in, claim receipts come back.</p>
+        <h2>School chain, <em>linked to Avalanche.</em></h2>
+        <p className="note">Students claim here for free</p>
+        <p className="note tech-only">{l1.name} · chain {l1.chainId} · roots in over ICM, claim receipts out.</p>
       </div>
       {l1.live && <SyncBox s={s} cfg={cfg} live={live} wallet={wallet} onChanged={onChanged} />}
       {error && !data && <div className="box alert" role="alert"><strong>Cannot read the ICM contracts on {cfg.network ?? 'Fuji'}</strong><p>{error}</p></div>}
@@ -185,16 +186,16 @@ export function L1Band({ s, cfg, data, live }: { s: Snapshot; cfg: ChainConfig; 
   const writers = chain?.allow.filter((e) => mayUse(e.send)).length;
   return (
     <a className="box l1-band" href="#l1" aria-label={`School L1: ${l1.name}`}>
-      <span className="lab">School L1 · {l1.name} · chainId {l1.chainId}</span>
-      {chain && sync === 'synced' && <span className="status delivered"><i aria-hidden="true" />Root #{chain.mirror.batchNo} in sync</span>}
+      <span className="l1-name"><b>School chain</b><span className="lab tech-only">{l1.name} · chainId {l1.chainId}</span></span>
+      {chain && sync === 'synced' && <span className="status delivered"><i aria-hidden="true" />Up to date<span className="tech-only">&nbsp;· root #{chain.mirror.batchNo}</span></span>}
       {chain && sync === 'behind' && <span className="status needs"><i aria-hidden="true" />Holds root #{chain.mirror.batchNo}, Fuji is at #{s.batchCount}</span>}
       {chain && sync === 'mismatch' && <span className="status failed"><i aria-hidden="true" />Root #{chain.mirror.batchNo} differs from Fuji</span>}
       {chain && sync === 'ahead' && <span className="status pending"><i aria-hidden="true" />Root #{chain.mirror.batchNo}</span>}
       {!chain && <span className="status pending"><i aria-hidden="true" />{!l1.live ? 'Read through Fuji' : live.error ? 'L1 RPC did not answer' : 'Reading the L1…'}</span>}
-      {chain && <span className="mono note">block {chain.head}</span>}
+      {chain && <span className="mono note tech-only">block {chain.head}</span>}
       {claims !== undefined && <span className="note">{plural(claims, 'claim')} checked there</span>}
-      {writers !== undefined && <span className="note hide-m">{plural(writers, 'wallet')} may write</span>}
-      <span className="link open">Open</span>
+      {writers !== undefined && <span className="note hide-m tech-only">{plural(writers, 'wallet')} may write</span>}
+      <span className="link open">Open →</span>
     </a>
   );
 }

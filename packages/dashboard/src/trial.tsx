@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Hex } from 'viem';
-import { buildClaim, cardKey } from '@zkdb/core';
-import { createReader, type ChainConfig } from './chain';
+import { buildClaim, cardKey, OPCODE } from '@zkdb/core';
+import { createReader, type ChainConfig, type Snapshot } from './chain';
+import { KEY_FIELD } from './points';
 import { proveClaimHere } from './claimProver';
 import { toHex32 } from './format';
 import { newCardSecret, newPickupCode, pickupHash } from './pickup';
@@ -9,6 +10,7 @@ import { Hash, OnChain, Section } from './ui';
 import { BatchArt, CardArt, ClaimArt } from './art';
 import { formatMs } from './useProofMeta';
 import { relayClaim, trialBatch, trialCard, trialInfo, type TrialInfo } from './wallet';
+import { Enrol, savedKey } from './perks';
 
 type Step = 'card' | 'batch' | 'claim';
 interface Done { label: string; hash: string; note?: string }
@@ -24,7 +26,7 @@ const storeKey = (cfg: ChainConfig) => `zkdb.trial.${cfg.address.toLowerCase()}`
  *   3. this browser proves "a card in the table has at least N points" and the relayer sends it; PointsGate checks it.
  * The trial table is separate from the club's, and the server caps cards and proofs per hour and per visitor.
  */
-export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => void }) {
+export function Trial({ s, cfg, onChanged }: { s: Snapshot; cfg: ChainConfig; onChanged: () => void }) {
   const [info, setInfo] = useState<TrialInfo | null>(null);
   const [secret, setSecret] = useState<bigint | null>(() => {
     try {
@@ -42,6 +44,15 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
   useEffect(() => {
     trialInfo().then(setInfo).catch(() => setInfo({ enabled: false }));
   }, []);
+
+  // Coming back to a card this device already made: pick up at the step it reached, so a failed claim can be retried
+  // after a reload instead of starting over with a new card.
+  useEffect(() => {
+    if (secret === null || done.length > 0 || code !== null) return;
+    const key = cardKey(secret);
+    if (s.rows.some((r) => r.fields[KEY_FIELD] === key)) setStep('claim');
+    else if (s.ops.some((o) => o.status === 'pending' && o.op[0] === OPCODE.INSERT && o.op[3 + KEY_FIELD] === key)) setStep('batch');
+  }, [s, secret, done.length, code]);
 
   const busy = status.kind === 'busy';
   const fail = (e: unknown) => setStatus({ kind: 'error', message: (e as Error).message || 'Something went wrong.' });
@@ -99,7 +110,10 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
     if (secret === null || !info?.table || info.perkId === undefined || !cfg.gate) return;
     setStatus({ kind: 'busy', label: 'Reading the ledger…' });
     try {
-      const snapshot = await createReader(cfg).snapshot();
+      // The page already holds a fresh, verified copy of the ledger; read the chain again only if the card is not in it
+      // yet. Each full read is many log queries, and public RPCs rate-limit them.
+      const key = cardKey(secret);
+      const snapshot = s.matches && s.rows.some((r) => r.fields[KEY_FIELD] === key) ? s : await createReader(cfg).snapshot();
       if (!snapshot.matches) throw new Error('The rebuilt table does not match the root on-chain. Try again in a moment.');
       const perk = snapshot.perks.find((p) => p.id === info.perkId);
       if (!perk) throw new Error('The trial perk is not on the gate.');
@@ -134,23 +148,14 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
     setStatus({ kind: 'idle' });
   }
 
-  if (!info) return <div className="box loading"><p className="note">Checking the trial…</p></div>;
-  if (!info.enabled) {
-    return (
-      <>
-        <Title />
-        <div className="box message">
-          <h2>Trial is off on this server</h2>
-          <p className="note">Start the API with <code>TRIAL_KEY</code> and <code>ZKDB_TRIAL_PERK</code>.</p>
-        </div>
-      </>
-    );
-  }
+  if (!info) return <div className="box loading"><p className="note">Getting the trial ready…</p></div>;
+  // Paused (no trial key on this server): the three steps still show, their buttons say why they wait.
+  const paused = !info.enabled;
 
   const steps: { id: Step; title: string; text: string; art: ReactNode; action: string; run: () => Promise<void> }[] = [
-    { id: 'card', title: 'Get a card', text: 'Your browser makes a secret. Only its hash is sent.', art: <CardArt />, action: 'Get a trial card', run: makeCard },
-    { id: 'batch', title: 'Prove the batch', text: 'One proof checks every change against the rules.', art: <BatchArt />, action: 'Prove and submit', run: proveBatch },
-    { id: 'claim', title: 'Claim privately', text: "Prove you have enough points without saying which card.", art: <ClaimArt />, action: 'Prove and claim', run: claim },
+    { id: 'card', title: 'Get a card', text: '150 points, key stays here', art: <CardArt />, action: 'Get my card', run: makeCard },
+    { id: 'batch', title: 'Prove it', text: 'Checked on-chain', art: <BatchArt />, action: 'Prove the points', run: proveBatch },
+    { id: 'claim', title: 'Claim privately', text: 'Your card stays hidden', art: <ClaimArt />, action: 'Claim the reward', run: claim },
   ];
   const order: Step[] = ['card', 'batch', 'claim'];
   const finished = code !== null;
@@ -158,8 +163,14 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
 
   return (
     <>
-      <Title quota={info.cardsLeftThisHour} currency={cfg.currency} />
-      <div className="steps">
+      <Title quota={paused ? undefined : info.cardsLeftThisHour} currency={cfg.currency} />
+      {paused && (
+        <p className="paused-note" role="status">
+          <i aria-hidden="true" />Paused on this server · the steps run when it is back
+          <span className="tech-only">&nbsp;(start the API with <code>TRIAL_KEY</code> and <code>ZKDB_TRIAL_PERK</code>)</span>
+        </p>
+      )}
+      <div className={paused ? 'steps paused' : 'steps'}>
         {steps.map((x, i) => {
           const p = phase(x.id);
           return (
@@ -173,21 +184,23 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
               <p>{x.text}</p>
               {p === 'now' && (
                 <div className="row-actions">
-                  <button type="button" className="primary" disabled={busy} onClick={() => void x.run()}>{x.action}</button>
+                  <button type="button" className="primary" disabled={busy || paused} onClick={() => void x.run()}>{paused ? 'Paused' : x.action}</button>
                 </div>
               )}
             </section>
           );
         })}
       </div>
+      {paused && <PausedEnrol cfg={cfg} />}
       {status.kind === 'busy' && <p className="tx busy" role="status">{status.label}</p>}
       {status.kind === 'error' && <p className="tx error" role="alert">{status.message}</p>}
 
       {finished && (
         <section className="box done-card" role="status">
           <div className="stack-form">
-            <h3>Written, proven,<br /><em>claimed.</em></h3>
-            <div className="lab">Your pickup code · stays on this device</div>
+            <h3>Done. Your reward<br /><em>is claimed.</em></h3>
+            <p className="note">Three real transactions. Nobody knows it was you.</p>
+            <div className="lab">Your pickup code</div>
             <Hash value={code} full />
             <div className="row-actions"><button type="button" className="secondary small" onClick={restart}>Start again</button></div>
           </div>
@@ -196,7 +209,7 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
       )}
 
       {done.length > 0 && (
-        <Section title="On-chain" count={done.length}>
+        <Section title="What happened on-chain" count={done.length}>
           <ol className="box txlist">
             {done.map((d) => (
               <li key={d.hash}>
@@ -212,12 +225,24 @@ export function Trial({ cfg, onChanged }: { cfg: ChainConfig; onChanged: () => v
   );
 }
 
+/** While the trial is off, getting a card still works: the key is made here and the club gets the enrol code. */
+function PausedEnrol({ cfg }: { cfg: ChainConfig }) {
+  const [saved, setSaved] = useState<Hex | null>(() => {
+    try {
+      return localStorage.getItem(savedKey(cfg)) as Hex | null;
+    } catch {
+      return null;
+    }
+  });
+  return <Enrol cfg={cfg} saved={saved} onSaved={setSaved} first />;
+}
+
 function Title({ quota, currency }: { quota?: number; currency?: string }) {
   return (
     <div className="page-title">
       <h2>Try it, <em>no wallet needed.</em></h2>
       <p className="note">
-        Every step is a real transaction. The server pays the gas.
+        3 steps · 1 minute · we pay the fees
         {quota !== undefined && <span className="trial-quota"><b>{quota}</b> cards left this hour</span>}
       </p>
     </div>

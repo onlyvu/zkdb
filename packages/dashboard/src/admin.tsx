@@ -71,29 +71,14 @@ export function Admin({ s, cfg, address, wallet, onSignIn, onChanged }: {
   const isAuditor = roles.includes('Auditor');
   return (
     <>
-      <div className="page-title">
-        <h2>Manage, <em>two keys at a time.</em></h2>
-        <p className="note">Award, correct and prove. Taking points away needs the auditor.</p>
+      <div className="page-title with-switch">
+        <h2>{address ? <>Admin, <em>{roles.filter((r) => r !== 'Viewer').join(' + ') || 'read only'}.</em></> : <>Sign in, <em>two keys at a time.</em></>}</h2>
+        {!address && <button type="button" className="primary" onClick={onSignIn}>Sign in</button>}
       </div>
-      {!address && (
-        <section className="box padded signin-prompt">
-          <div>
-            <h2>Sign in to make changes</h2>
-            <p className="note">With the treasurer's, the auditor's or the owner's wallet. Everything on this page can be read without one.</p>
-          </div>
-          <button type="button" className="primary" onClick={onSignIn}>Sign in</button>
-        </section>
-      )}
       {address && !wallet && (
         <section className="box padded signin-prompt">
           <h2>Wallet not connected</h2>
           <button type="button" className="primary" onClick={onSignIn}>Reconnect</button>
-        </section>
-      )}
-      {address && roles.includes('Viewer') && (
-        <section className="box padded">
-          <h2>Read-only account</h2>
-          <p className="note">This wallet holds no role on the ledger. The roles below say which wallets do.</p>
         </section>
       )}
       <div className="admin-grid">
@@ -124,7 +109,6 @@ function ProposalsPanel({ cfg, wallet, s, onChanged }: { cfg: ChainConfig; walle
     <Section
       title="Waiting for the auditor"
       count={open.length}
-      note={auditor ? 'Awards need one signature. Taking points away needs the auditor too.' : 'No auditor on this table.'}
     >
       {open.length === 0 ? <Empty>None waiting.</Empty> : (
         <ul className="corrections box">
@@ -174,25 +158,21 @@ function AccessOverview({ s }: { s: Snapshot }) {
   const auditor = s.tableAuditors.find((t) => t.tableId === PROGRAM.table)?.auditor;
   const others = s.writers.filter((w) => !treasurer || !same(w, treasurer));
   const g = s.governor;
-  const held = (address: string | undefined, can: string): ReactNode => (address
-    ? <span className="stack"><OnChain value={address} kind="address" /><span className="note">{can}</span></span>
-    : 'Nobody');
+  const held = (address: string | undefined): ReactNode => (address ? <OnChain value={address} kind="address" always /> : 'Nobody');
   return (
-    <Section title="Roles" note={g
-      ? `Read from the contract. Changing one needs ${g.threshold} of the owner's ${g.signers.length} signers and a ${g.delay}-second public wait.`
-      : 'Read from the contract. Only the owner can change them, and each change is an event anyone can read.'}>
+    <Section title="Roles">
       <KeyValues items={[
-        ['Treasurer', held(treasurer, 'Awards points and adds members alone. Proposes redemptions and corrections.')],
-        ['Auditor', held(auditor, 'Co-signs or declines each redemption and correction.')],
-        ['Owner', held(s.owner, g ? `A governor contract: ${g.threshold} of ${g.signers.length} signers, then a ${g.delay} s wait. Names the treasurer and the auditor.` : 'Names the treasurer and the auditor.')],
+        ['Treasurer', held(treasurer)],
+        ['Auditor', held(auditor)],
+        [g ? `Owner · ${g.threshold} of ${g.signers.length}` : 'Owner', held(s.owner)],
         ...(others.length ? [['Other writers', <span className="chips">{others.map((w) => <Hash key={w} value={w} />)}</span>] as [string, ReactNode]] : []),
         ...s.tableOwners.filter((t) => t.tableId !== PROGRAM.table).map((t): [string, ReactNode] => [t.tableId === TRIAL_TABLE ? `Trial table (${formatField(t.tableId)})` : `Table ${formatField(t.tableId)}`, <Hash value={t.writer} />]),
         ...s.tableAuditors.filter((t) => t.tableId !== PROGRAM.table).map((t): [string, ReactNode] => [`Table ${formatField(t.tableId)} auditor`, <Hash value={t.auditor} />]),
       ]} />
-      <Details>
+      <Details label="Contracts" always>
         <KeyValues items={[
-          ['Database contract', <OnChain value={s.address} kind="address" />],
-          ['Verifier', <OnChain value={s.verifier} kind="address" />],
+          ['Database contract', <OnChain value={s.address} kind="address" always />],
+          ['Verifier', <OnChain value={s.verifier} kind="address" always />],
         ]} />
       </Details>
     </Section>

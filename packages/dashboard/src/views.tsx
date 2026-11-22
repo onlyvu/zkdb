@@ -1,13 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import type { ChainConfig, Snapshot } from './chain';
 import { actionName, describeOp, FIELD_NAMES, formatAmount, formatFee, formatField, formatGas, formatGasShort, formatTime, plural, toHex32 } from './format';
-import { cardOf, changeLabel, formatCard, members, pointsEvents, PROGRAM, trialChange, unqueuedProposals, type Member, type PointsEvent, type UnqueuedProposal } from './points';
+import { cardOf, changeLabel, formatCard, members, pointsEvents, trialChange, unqueuedProposals, type Member, type PointsEvent, type UnqueuedProposal } from './points';
 import { batchSlots, nextBatchSlots, type BatchView, type OpStatus, type OpView } from './replay';
 import { Actor, Details, Empty, Hash, K, KeyValues, OnChain, OpStatusLabel, Section, SlotBar, SlotLegend, STATUS, Table } from './ui';
 import type { Delivery } from './useIcm';
 import { atRefPrice, type PriceRef } from './usePriceRef';
 import { formatMs, rootKey, type ProofMetaMap } from './useProofMeta';
-import { HeroArt } from './art';
+import { BatchArt, CardArt, ClaimArt, Glyph, Seal } from './art';
+import { useMyCard, WalletCard } from './mycard';
 import { L1Band, L1Tx } from './l1view';
 import type { L1Live, L1LiveState } from './l1live';
 import type { SchoolL1State } from './schoolL1';
@@ -27,124 +28,148 @@ function usePoints(s: Snapshot) {
 const average = (xs: bigint[]) => (xs.length ? xs.reduce((a, b) => a + b, 0n) / BigInt(xs.length) : undefined);
 
 export function Overview({ s, stale, cfg, meta = {}, priceRef, l1, l1Live, onCheck }: PageProps & { stale: boolean; l1?: SchoolL1State; l1Live?: L1LiveState; onCheck?: () => Promise<number> }) {
-  const { events, members: list } = usePoints(s);
+  const { members: list } = usePoints(s);
   const latest = s.batches[s.batches.length - 1];
   const confirmMs = latest ? meta[rootKey(latest.newRoot)]?.confirmMs : undefined;
   const total = list.reduce((sum, m) => sum + m.balance, 0n);
   const fees = s.batches.map((b) => b.fee).filter((f): f is bigint => f !== undefined);
   const gas = s.batches.map((b) => b.gasUsed).filter((g): g is bigint => g !== undefined);
-  const top = [...list].sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : a.rowId - b.rowId)).slice(0, 6);
+  const mine = useMyCard(cfg, s);
+  const cost = atRefPrice(average(gas), priceRef, cfg?.currency) ?? (cfg?.currency && fees.length ? formatFee(average(fees), cfg.currency) : undefined);
   return (
     <>
-      <section className="box hero" aria-labelledby="hero-title">
+      <section className="hero" aria-labelledby="hero-title">
         <div className="hero-copy">
-          <span className="eyebrow"><i className={stale ? 'dot off' : 'dot on'} aria-hidden="true" />{PROGRAM.club} · {cfg?.network ?? 'local chain'}</span>
-          <h1 id="hero-title">Every point,<br /><em>proven.</em></h1>
-          <Intro s={s} stale={stale} onCheck={onCheck} />
+          <h1 id="hero-title">The ZK ledger <em>for students.</em></h1>
+          <p className="lede">Volunteer, earn points, get rewards. Nobody can fake them.</p>
+          <div className="cta">
+            {mine
+              ? <a className="button primary" href="#perks"><Glyph name="gift" />Use my points</a>
+              : cfg?.gate && <a className="button primary" href="#try"><Glyph name="card" />Get a card · 1 min</a>}
+            <Verify s={s} stale={stale} onCheck={onCheck} />
+          </div>
+          <VerifyDetails s={s} />
         </div>
-        <div className="hero-art"><HeroArt /></div>
+        <div className="hero-card">
+          {mine
+            ? <a href={mine.trial ? '#perks' : `#member/${mine.rowId}`} aria-label="My card"><WalletCard card={mine.card} points={mine.balance} caption={mine.trial ? 'Trial card' : 'My card'} /></a>
+            : <WalletCard ghost points={0n} caption="Your card here" />}
+        </div>
       </section>
-      {cfg?.l1 && l1Live && <L1Band s={s} cfg={cfg} data={l1} live={l1Live} />}
+
+      <section className="how" aria-labelledby="how-title">
+        <h2 id="how-title" className="sr-only">How it works</h2>
+        <ol>
+          <li><CardArt /><h3>Points go in</h3><p>Public, signed by name</p></li>
+          <li><BatchArt /><h3>Math checks them</h3><p>Bad changes bounce</p></li>
+          <li><ClaimArt /><h3>Claim privately</h3><p>Your card stays hidden</p></li>
+        </ol>
+      </section>
+
       <section className="tiles four" aria-label="Summary">
-        <a className="box tile" href="#members">
+        <div className="box tile c-blue">
+          <span className="tile-ico"><Glyph name="people" className="bounce" /></span>
           <div className="lab">Members</div>
           <div className="big">{list.length}</div>
-          <p className="note">{plural(s.batchCount, 'proof')} so far</p>
-        </a>
-        <a className="box tile" href="#members">
+        </div>
+        <div className="box tile c-lime">
+          <span className="tile-ico"><Glyph name="coins" className="bounce" /></span>
           <div className="lab">Points held</div>
           <div className="big">{formatAmount(total)}</div>
-          <p className="note">avg {formatAmount(list.length ? total / BigInt(list.length) : 0n)} per member</p>
-        </a>
-        <a className="box tile" href="#admin">
+        </div>
+        <div className="box tile c-amber">
+          <span className="tile-ico"><Glyph name="hourglass" className="spin" /></span>
           <div className="lab">Waiting</div>
-          <div className="big">{s.pending}<span className="of mono">/{K}</span></div>
-          <SlotBar slots={nextBatchSlots(s.ops)} small />
-        </a>
-        <a className="box tile" href="#batches">
-          <div className="lab">Gas per proof</div>
-          <div className="big fee">{formatGasShort(average(gas))}</div>
-          <p className="note">
-            {[
-              confirmMs !== undefined ? `confirmed in ${formatMs(confirmMs)}` : '',
-              atRefPrice(average(gas), priceRef, cfg?.currency) ?? (cfg?.currency && fees.length ? `fee ${formatFee(average(fees), cfg.currency)}` : ''),
-            ].filter(Boolean).join(' · ')}
+          <div className="big">{s.pending}</div>
+          <p className="note tech-only">{s.pending}/{K} slots of the next proof</p>
+        </div>
+        <div className="box tile c-violet">
+          <span className="tile-ico"><Glyph name="bolt" className="zap" /></span>
+          <div className="lab">Cost per proof</div>
+          <div className="big">{cost?.replace(/^≈\s*/, '').split(' at ')[0] ?? formatGasShort(average(gas))}</div>
+          <p className="note tech-only">
+            {[`${formatGasShort(average(gas))} gas`, cost?.includes(' at ') ? `at ${cost.split(' at ')[1]}` : '', confirmMs !== undefined ? `confirmed in ${formatMs(confirmMs)}` : ''].filter(Boolean).join(' · ')}
           </p>
-        </a>
+        </div>
       </section>
-      <div className="columns">
-        <Section title="Top members" actions={<a className="link" href="#members">All {list.length}</a>}>
-          {top.length === 0 ? <Empty>No members yet.</Empty> : <MemberTable list={top} max={top[0]?.balance ?? 0n} />}
-        </Section>
-        <Section title="Activity" actions={<a className="link" href="#ops">All {s.ops.length}</a>}>
-          {events.length === 0 ? <Empty>No activity yet.</Empty> : <EventList events={[...events].reverse().slice(0, 6)} ops={s.ops} />}
-        </Section>
-      </div>
+
+      {cfg?.l1 && l1Live && <L1Band s={s} cfg={cfg} data={l1} live={l1Live} />}
+
     </>
   );
 }
 
 /**
- * Verification status: this browser re-ran every confirmed change and compares the root it got with the root the
- * contract holds. Below it, the slots of the latest proof.
+ * Verification status, the size of a button: this browser re-ran every confirmed change and compared its root with
+ * the contract's. Pressing it runs the check again.
  */
-function Intro({ s, stale, onCheck }: { s: Snapshot; stale: boolean; onCheck?: () => Promise<number> }) {
+function Verify({ s, stale, onCheck }: { s: Snapshot; stale: boolean; onCheck?: () => Promise<number> }) {
   const state = stale ? 'unknown' : s.matches ? 'match' : 'mismatch';
-  const verdict = { match: 'Data verified', mismatch: 'Data does not match', unknown: 'Offline' }[state];
-  const latest = s.batches[s.batches.length - 1];
-  const used = latest ? latest.toOp - latest.fromOp : 0;
-  const [checked, setChecked] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [run, setRun] = useState(0);
+  const label = checking ? 'Checking…' : { match: `Verified · ${s.head}/${s.head}`, mismatch: 'Does not match', unknown: 'Offline' }[state];
   const check = () => {
-    setChecked('Checking…');
-    // Reads the log from the chain again and re-runs every change; the verdict above is then that fresh result.
-    onCheck?.().then((ms) => setChecked(`Checked again in ${formatMs(ms)}`), () => setChecked('Could not reach the chain'));
+    if (!onCheck || checking) return;
+    setChecking(true);
+    // Reads the log from the chain again and re-runs every change; the pill then shows that fresh result.
+    onCheck().finally(() => { setChecking(false); setRun((n) => n + 1); });
   };
   return (
-    <div className={`intro ${state}`}>
-      <div className="intro-head">
-        <div className="verdict">
-          <svg className="mark" viewBox="0 0 16 16" aria-hidden="true">
-            {state === 'match' && <path d="M3 8.5 6.5 12 13 4.5" />}
-            {state === 'mismatch' && <path d="M4 4l8 8M12 4l-8 8" />}
-            {state === 'unknown' && <path d="M3 8h10" />}
-          </svg>
-          <div>
-            <h1>{verdict}</h1>
-            {state !== 'unknown' && (
-              <p className="note how">
-                {plural(s.head, 'change')} replayed in this browser{state === 'match' ? ', root matches' : ', root differs'}.
-                {onCheck && <> <button type="button" className="textlink" onClick={check}>{checked ?? 'Check again'}</button></>}
-              </p>
-            )}
-          </div>
-        </div>
-        {state === 'mismatch' ? (
+    <button
+      type="button"
+      className={`verify ${state}`}
+      onClick={check}
+      disabled={!onCheck || state === 'unknown'}
+      title="Your browser rebuilt the ledger from the chain and compared it. Press to check again."
+      aria-busy={checking}
+    >
+      <Seal key={run} state={state} />
+      <span>{label}</span>
+      <svg className={checking ? 'again spin' : 'again'} viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3" /></svg>
+    </button>
+  );
+}
+
+/** With chain details on: the root, the latest proof's slots, and any replay issue. */
+function VerifyDetails({ s }: { s: Snapshot }) {
+  const latest = s.batches[s.batches.length - 1];
+  const used = latest ? latest.toOp - latest.fromOp : 0;
+  return (
+    <>
+      <div className="tech-only intro-tech">
+        {s.matches ? (
+          <span className="pair">Root <Hash value={toHex32(s.root)} /></span>
+        ) : (
           <dl className="roots">
             <div><dt>Chain</dt><dd><Hash value={toHex32(s.root)} /></dd></div>
             <div><dt>Here</dt><dd><Hash value={toHex32(s.replayRoot)} /></dd></div>
           </dl>
-        ) : (
-          <span className="pair">Root <Hash value={toHex32(s.root)} /></span>
+        )}
+        {latest && (
+          <a className="intro-proof" href={`#batch/${latest.batchNo}`} aria-label={`Proof #${latest.batchNo}`}>
+            <span className="lab">Latest proof #{latest.batchNo} · {used}/{K} slots</span>
+            <SlotBar slots={batchSlots(latest, s.ops)} />
+          </a>
         )}
       </div>
-      {latest && (
-        <a className="intro-proof" href={`#batch/${latest.batchNo}`} aria-label={`Proof #${latest.batchNo}`}>
-          <span className="lab">Latest proof #{latest.batchNo} · {used}/{K} slots</span>
-          <SlotBar slots={batchSlots(latest, s.ops)} />
-          <SlotLegend slots={batchSlots(latest, s.ops)} />
-        </a>
-      )}
       {s.issues.length > 0 && <ul className="issues">{s.issues.map((i) => <li key={i}>{i}</li>)}</ul>}
-    </div>
+    </>
   );
 }
 
-function MemberTable({ list, max }: { list: Member[]; max: bigint }) {
+/** Members as a leaderboard. `rankOf` keeps each member's place when the list is filtered. */
+function MemberTable({ list, max, rankOf }: { list: Member[]; max: bigint; rankOf?: Map<number, number> }) {
   return (
-    <Table className="t-members" head={[['Card'], ['Points', 'right'], ['Share', 'hide-m'], ['Last change', 'hide-m']]}>
-      {list.map((m) => (
+    <Table className="t-members" head={[['Member'], ['Points', 'right'], ['Share', 'hide-m'], ['Last change', 'hide-m']]}>
+      {list.map((m, i) => (
         <tr key={m.rowId}>
-          <td className="mono"><a className="link" href={`#member/${m.rowId}`}>{formatCard(m.card)}</a></td>
+          <td>
+            <a className="who" href={`#member/${m.rowId}`}>
+              <Rank n={rankOf?.get(m.rowId) ?? i + 1} />
+              <Avatar card={m.card} />
+              <span className="card-id">{formatCard(m.card)}</span>
+            </a>
+          </td>
           <td className="mono right points">{formatAmount(m.balance)}</td>
           <td className="hide-m"><span className="bar"><i style={{ width: `${max > 0n ? Number((m.balance * 1000n) / max) / 10 : 0}%` }} /></span></td>
           <td className="hide-m">
@@ -159,10 +184,20 @@ function MemberTable({ list, max }: { list: Member[]; max: bigint }) {
   );
 }
 
+const KIND_GLYPH: Record<string, string> = { award: 'up', redeem: 'gift', correct: 'pen', join: 'join', leave: 'leave' };
+
+/** A card's colour and last two digits: the same card looks the same on every page. */
+const Avatar = ({ card, small }: { card: bigint; small?: boolean }) => (
+  <span className={small ? 'avatar small' : 'avatar'} aria-hidden="true" style={{ ['--h' as string]: `${(Number(card) * 47) % 360}` }}>{card.toString().slice(-2).padStart(2, '0')}</span>
+);
+
+const Rank = ({ n }: { n: number }) => <span className={`rank r${n}`} aria-label={`Rank ${n}`}>{n}</span>;
+
 function EventChange({ e }: { e: PointsEvent }) {
   const tone = e.kind === 'correct' ? 'warn' : e.kind === 'redeem' ? 'spend' : e.kind === 'award' ? 'earn' : '';
   return (
     <span className={`delta ${tone}${e.status === 'failed' ? ' struck' : ''}`}>
+      <span className={`kind ${e.status === 'failed' ? 'failed' : tone || 'neutral'}`} aria-hidden="true"><Glyph name={KIND_GLYPH[e.kind] ?? 'plus'} /></span>
       <b className="mono">{changeLabel(e)}</b>
       {e.reason && <span className="reason">{e.reason}</span>}
     </span>
@@ -187,29 +222,13 @@ function Signers({ s, e }: { s: Snapshot; e: PointsEvent }) {
   );
 }
 
-function EventList({ events, ops }: { events: PointsEvent[]; ops: OpView[] }) {
-  return (
-    <ul className="events box">
-      {events.map((e) => {
-        const card = cardOf(e.rowId, ops);
-        return (
-          <li key={e.op.id}>
-            <a className="mono link card" href={`#member/${e.rowId}`}>{card !== undefined ? formatCard(card) : `Row ${e.rowId}`}</a>
-            <EventChange e={e} />
-            <span className="when note">{ago(e.op.timestamp)}</span>
-            <EventStatus e={e} />
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 export function Members({ s }: PageProps) {
   const { members: list } = usePoints(s);
   const [query, setQuery] = useState('');
   const q = query.replace(/\D/g, '');
-  const shown = q ? list.filter((m) => m.card.toString().includes(q.replace(/^0+/, '') || '0')) : list;
+  const ranked = [...list].sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : a.rowId - b.rowId));
+  const rankOf = new Map(ranked.map((m, i) => [m.rowId, i + 1]));
+  const shown = q ? ranked.filter((m) => m.card.toString().includes(q.replace(/^0+/, '') || '0')) : ranked;
   const max = list.reduce((a, m) => (m.balance > a ? m.balance : a), 0n);
   return (
     <Section
@@ -218,12 +237,12 @@ export function Members({ s }: PageProps) {
       count={list.length}
       actions={(
         <div className="row-actions">
-          <input className="mono find" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Card #" aria-label="Find a card" inputMode="numeric" />
-          <a className="link raw-link" href="#data">Raw rows</a>
+          <input className="mono find" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find card #" aria-label="Find a card" inputMode="numeric" />
+          <a className="link raw-link tech-only" href="#data">Raw rows</a>
         </div>
       )}
     >
-      {shown.length === 0 ? <Empty>{list.length ? 'No card matches.' : 'No members yet.'}</Empty> : <MemberTable list={shown} max={max} />}
+      {shown.length === 0 ? <Empty>{list.length ? 'No card matches.' : 'No members yet.'}</Empty> : <MemberTable list={shown} max={max} rankOf={rankOf} />}
     </Section>
   );
 }
@@ -237,27 +256,31 @@ export function MemberDetail({ s, id }: PageProps & { id: number }) {
   const card = m?.card ?? cardOf(id, s.ops);
   const proven = history.find((e) => e.status !== 'pending')?.op.batchNo;
   const corrected = history.filter((e) => e.kind === 'correct' && e.status === 'applied').length;
+  const done = history.filter((e) => e.status === 'applied');
+  const earned = done.filter((e) => e.kind === 'award' || e.kind === 'join').reduce((t, e) => t + (e.amount > 0n ? e.amount : 0n), 0n);
+  const spent = done.filter((e) => e.kind === 'redeem').reduce((t, e) => t - e.amount, 0n);
+  const rank = m ? [...list].sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : a.rowId - b.rowId)).findIndex((x) => x.rowId === m.rowId) + 1 : 0;
   return (
     <>
       <Back href="#members" label="Members" />
-      <section className="box member-head">
-        <div>
-          <div className="lab">Card</div>
-          <h1 className="mono">{card !== undefined ? formatCard(card) : `Row ${id}`}</h1>
-        </div>
-        <div className="balance">
-          <div className="lab">Points</div>
-          <div className="big">{m ? formatAmount(m.balance) : '—'}</div>
-        </div>
-        <div className="member-proof">
-          {corrected > 0 && <span className="status corrected"><i aria-hidden="true" />Corrected {corrected === 1 ? 'once' : `${corrected} times`}</span>}
-          {proven !== undefined && <a className="status applied" href={`#batch/${proven}`}><i aria-hidden="true" />Proven in #{proven}</a>}
-          {m && m.waiting > 0 && <span className="status pending"><i aria-hidden="true" />{m.waiting} waiting</span>}
-          {!m && <span className="status pending"><i aria-hidden="true" />Not proven yet</span>}
+      <section className="member-hero">
+        <WalletCard card={card} points={m?.balance} caption={m ? 'Member card' : 'Not proven yet'} />
+        <div className="member-stats">
+          <div className="member-proof">
+            {corrected > 0 && <span className="status corrected"><i aria-hidden="true" />Corrected {corrected === 1 ? 'once' : `${corrected} times`}</span>}
+            {proven !== undefined && <a className="status applied" href={`#batch/${proven}`}><i aria-hidden="true" />Proven<span className="tech-only">&nbsp;in #{proven}</span></a>}
+            {m && m.waiting > 0 && <span className="status pending"><i aria-hidden="true" />{m.waiting} waiting</span>}
+            {!m && <span className="status pending"><i aria-hidden="true" />Not proven yet</span>}
+          </div>
+          <dl className="mini-stats">
+            <div><Glyph name="up" /><dt>Earned</dt><dd>{formatAmount(earned)}</dd></div>
+            <div><Glyph name="gift" /><dt>Spent</dt><dd>{formatAmount(spent)}</dd></div>
+            <div><Glyph name="people" /><dt>Rank</dt><dd>{rank ? `${rank} of ${list.length}` : '—'}</dd></div>
+          </dl>
         </div>
       </section>
       <Section title="History" count={history.length + mine.length}>
-        <Table className="t-history" head={[['When', 'hide-m'], ['Change'], ['Signed by'], ['Balance', 'right'], ['Status'], ['Proof', 'right hide-m']]}>
+        <Table className="t-history" head={[['When', 'hide-m'], ['Change'], ['Signed by'], ['Balance', 'right'], ['Status'], ['Proof', 'right hide-m tech-only']]}>
           {mine.map((p) => <ProposalRow key={`c${p.proposal.id}`} s={s} p={p} balance={m?.balance} />)}
           {history.map((e) => (
             <tr key={e.op.id} className={e.kind === 'correct' ? 'flag' : undefined}>
@@ -266,7 +289,7 @@ export function MemberDetail({ s, id }: PageProps & { id: number }) {
               <td><Signers s={s} e={e} /></td>
               <td className="mono right">{e.after !== undefined ? formatAmount(e.after) : '—'}</td>
               <td><EventStatus e={e} /></td>
-              <td className="mono right hide-m">{e.op.batchNo === undefined ? '' : <a className="link" href={`#batch/${e.op.batchNo}`}>#{e.op.batchNo}</a>}</td>
+              <td className="mono right hide-m tech-only">{e.op.batchNo === undefined ? '' : <a className="link" href={`#batch/${e.op.batchNo}`}>#{e.op.batchNo}</a>}</td>
             </tr>
           ))}
         </Table>
@@ -300,14 +323,23 @@ function ProposalRow({ s, p, balance }: { s: Snapshot; p: UnqueuedProposal; bala
       <td>{open
         ? <span className="status needs"><i aria-hidden="true" />Needs auditor</span>
         : <span className="status failed"><i aria-hidden="true" />Declined</span>}</td>
-      <td className="hide-m" />
+      <td className="hide-m tech-only" />
     </tr>
   );
 }
 
 const Result = ({ b }: { b: BatchView }) => (
-  <span className="result mono"><span className="good">{b.applied}</span>{b.failed > 0 && <> · <span className="bad">{b.failed}</span></>}</span>
+  <span className="result">
+    <span className="chip-n good" title={`${b.applied} accepted`}>✓ {b.applied}</span>
+    {b.failed > 0 && <span className="chip-n bad" title={`${b.failed} rejected`}>✕ {b.failed}</span>}
+  </span>
 );
+
+/** "0.168 nAVAX" → the number to read, the unit quiet beside it. */
+const Qty = ({ text }: { text: string }) => {
+  const m = /^([\d.,]+)\s*(.*)$/.exec(text);
+  return m ? <span className="qty"><b>{m[1]}</b>{m[2] && <small>{m[2]}</small>}</span> : <span className="qty none">{text}</span>;
+};
 
 const TxLink = ({ hash, cfg }: { hash: string; cfg?: ChainConfig }) => (cfg?.explorer
   ? <a className="link ext mono" href={`${cfg.explorer}/tx/${hash}`} target="_blank" rel="noreferrer">{hash.slice(0, 8)}… ↗</a>
@@ -358,20 +390,20 @@ function L1RootStatus({ b, cfg, l1, l1Live, links }: { b: BatchView; cfg: ChainC
 
 export function Batches({ s, cfg, meta = {}, deliveries, l1, l1Live }: PageProps & L1Props) {
   return (
-    <Section page title="Proofs" count={s.batches.length}>
+    <Section page title="Proofs" count={s.batches.length} note="Up to 16 changes per proof">
       {s.batches.length === 0 ? <Empty>No proofs yet.</Empty> : (
-        <Table head={[['Proof'], ['Slots'], ['Result'], ['Gas', 'right hide-m'], ...(cfg?.currency ? [['Fee', 'right'] as [string, string]] : []), ['Proved in', 'right hide-m'], ...(cfg?.l1 ? [[`Root on ${cfg.l1.name}`, 'hide-m'] as [string, string]] : []), ...(cfg?.icm ? [[`Root sent to ${cfg.icm.name}`, 'hide-m'] as [string, string]] : []), ['Transaction', 'hide-m']]}>
+        <Table head={[['Proof'], ['Changes'], ['Result'], ['Gas', 'right hide-m tech-only'], ...(cfg?.currency ? [['Fee', 'right'] as [string, string]] : []), ['Proved in', 'right hide-m'], ...(cfg?.l1 ? [[`On ${cfg.l1.name}`, 'hide-m tech-only'] as [string, string]] : []), ...(cfg?.icm ? [[`Sent to ${cfg.icm.name}`, 'hide-m tech-only'] as [string, string]] : []), ['Transaction', 'hide-m tech-only']]}>
           {[...s.batches].reverse().map((b) => (
             <tr key={b.batchNo}>
-              <td className="mono"><a className="link" href={`#batch/${b.batchNo}`}>#{b.batchNo}</a></td>
+              <td><a className="proof-id" href={`#batch/${b.batchNo}`}>#{b.batchNo}</a></td>
               <td><SlotBar slots={batchSlots(b, s.ops)} small /></td>
               <td><Result b={b} /></td>
-              <td className="mono right hide-m">{formatGas(b.gasUsed)}</td>
-              {cfg?.currency && <td className="mono right">{formatFee(b.fee, cfg.currency)}</td>}
-              <td className="mono right hide-m">{formatMs(meta[rootKey(b.newRoot)]?.provingMs)}</td>
-              {cfg?.l1 && <td className="hide-m"><L1RootStatus b={b} cfg={cfg} l1={l1} l1Live={l1Live} /></td>}
-              {cfg?.icm && <td className="hide-m"><RelayStatus s={s} b={b} cfg={cfg} deliveries={deliveries} /></td>}
-              <td className="hide-m"><TxLink hash={b.txHash} cfg={cfg} /></td>
+              <td className="mono right hide-m tech-only">{formatGas(b.gasUsed)}</td>
+              {cfg?.currency && <td className="right"><Qty text={formatFee(b.fee, cfg.currency)} /></td>}
+              <td className="right hide-m"><Qty text={formatMs(meta[rootKey(b.newRoot)]?.provingMs)} /></td>
+              {cfg?.l1 && <td className="hide-m tech-only"><L1RootStatus b={b} cfg={cfg} l1={l1} l1Live={l1Live} /></td>}
+              {cfg?.icm && <td className="hide-m tech-only"><RelayStatus s={s} b={b} cfg={cfg} deliveries={deliveries} /></td>}
+              <td className="hide-m tech-only"><TxLink hash={b.txHash} cfg={cfg} /></td>
             </tr>
           ))}
         </Table>
@@ -389,7 +421,7 @@ export function BatchDetail({ s, batchNo, cfg, meta = {}, deliveries, priceRef, 
   return (
     <>
       <Back href="#batches" label="All proofs" />
-      <Section page title={`Proof #${b.batchNo}`} note={formatTime(b.timestamp)}>
+      <Section page title={`Proof #${b.batchNo}`} note={<>{formatTime(b.timestamp)} · {b.applied} {b.applied === 1 ? 'change' : 'changes'} in{b.failed > 0 ? `, ${b.failed} rejected` : ''}{cfg?.explorer && <> · <a className="link ext" href={`${cfg.explorer}/tx/${b.txHash}`} target="_blank" rel="noreferrer">See it on-chain ↗</a></>}</>}>
         <div className="box padded slot-panel"><SlotBar slots={slots} /><SlotLegend slots={slots} /></div>
       </Section>
       <section className="tiles fit" aria-label="Cost and timing">
@@ -397,19 +429,21 @@ export function BatchDetail({ s, batchNo, cfg, meta = {}, deliveries, priceRef, 
           <div className="box tile">
             <div className="lab">Fee paid</div>
             <div className="big fee">{formatFee(b.fee, cfg.currency)}</div>
-            {priceRef && <p className="note mono">{atRefPrice(b.gasUsed, priceRef, cfg.currency)}</p>}
+            {priceRef && <p className="note tech-only">{atRefPrice(b.gasUsed, priceRef, cfg.currency)}</p>}
           </div>
         )}
-        <div className="box tile"><div className="lab">Gas</div><div className="big fee">{formatGas(b.gasUsed)}</div></div>
-        <div className="box tile"><div className="lab">Proved in</div><div className="big fee">{formatMs(m?.provingMs)}</div></div>
-        <div className="box tile"><div className="lab">Confirmed in</div><div className="big fee">{formatMs(m?.confirmMs)}</div></div>
+        <div className="box tile tech-only"><div className="lab">Gas</div><div className="big fee">{formatGas(b.gasUsed)}</div></div>
+        {m?.provingMs !== undefined && <div className="box tile"><div className="lab">Proved in</div><div className="big fee">{formatMs(m.provingMs)}</div></div>}
+        {m?.confirmMs !== undefined && <div className="box tile"><div className="lab">Confirmed in</div><div className="big fee">{formatMs(m.confirmMs)}</div></div>}
       </section>
-      <KeyValues items={[
-        ['Transaction', <OnChain value={b.txHash} kind="tx" />],
-        ['Root after', <Hash value={toHex32(b.newRoot)} />],
-        ...(cfg?.l1 ? [[`Root on ${cfg.l1.name} (ICM)`, <L1RootStatus b={b} cfg={cfg} l1={l1} l1Live={l1Live} links />] as [string, ReactNode]] : []),
-        ...(cfg?.icm ? [[`Root sent to ${cfg.icm.name} (ICM)`, <RelayStatus s={s} b={b} cfg={cfg} deliveries={deliveries} links />] as [string, ReactNode]] : []),
-      ]} />
+      <div className="tech-only">
+        <KeyValues items={[
+          ['Transaction', <OnChain value={b.txHash} kind="tx" />],
+          ['Root after', <Hash value={toHex32(b.newRoot)} />],
+          ...(cfg?.l1 ? [[`Root on ${cfg.l1.name} (ICM)`, <L1RootStatus b={b} cfg={cfg} l1={l1} l1Live={l1Live} links />] as [string, ReactNode]] : []),
+          ...(cfg?.icm ? [[`Root sent to ${cfg.icm.name} (ICM)`, <RelayStatus s={s} b={b} cfg={cfg} deliveries={deliveries} links />] as [string, ReactNode]] : []),
+        ]} />
+      </div>
       <Section title="Changes" count={ops.length}><ChangesTable s={s} ops={ops} /></Section>
     </>
   );
@@ -424,7 +458,7 @@ export function Ops({ s }: PageProps) {
   return (
     <Section
       page
-      title="Activity"
+      title="History"
       count={s.ops.length}
       actions={
         <div className="filters" role="group" aria-label="Filter changes by status">
@@ -446,7 +480,7 @@ function ChangesTable({ s, ops }: { s: Snapshot; ops: OpView[] }) {
   const all = s.ops;
   const byOp = useMemo(() => new Map(pointsEvents(all, s.proposals).map((e) => [e.op.id, e])), [all, s.proposals]);
   return (
-    <Table className="t-changes" head={[['#'], ['Status'], ['Member'], ['Change'], ['Signed by', 'hide-m'], ['When', 'hide-m'], ['Proof', 'hide-m right']]}>
+    <Table className="t-changes" head={[['#', 'tech-only'], ['Status'], ['Card'], ['Change'], ['Signed by', 'hide-m'], ['When', 'hide-m'], ['Proof', 'hide-m right tech-only']]}>
       {ops.map((o) => {
         const e = byOp.get(o.id);
         const card = e ? cardOf(e.rowId, all) : undefined;
@@ -454,13 +488,15 @@ function ChangesTable({ s, ops }: { s: Snapshot; ops: OpView[] }) {
         const trial = e ? null : trialChange(o.op, all);
         return (
           <tr key={o.id} className={e?.kind === 'correct' ? 'flag' : undefined}>
-            <td className="mono"><a className="link" href={`#op/${o.id}`}>#{o.id}</a></td>
+            <td className="mono tech-only"><a className="link" href={`#op/${o.id}`}>#{o.id}</a></td>
             <td>{e ? <EventStatus e={e} /> : <OpStatusLabel status={o.status} />}</td>
-            <td className="mono">{e && card !== undefined ? <a className="link" href={`#member/${e.rowId}`}>{formatCard(card)}</a> : <a className="link note" href={`#row/${o.op[1]}`}>{trial ? 'trial' : 'row'} {o.op[1].toString()}</a>}</td>
+            <td>{e && card !== undefined
+              ? <a className="who" href={`#member/${e.rowId}`}><Avatar card={card} small /><span className="card-id">{formatCard(card)}</span></a>
+              : <a className="who muted" href={`#row/${o.op[1]}`}><span className="card-id">{trial ? 'Trial' : 'Row'} #{o.op[1].toString()}</span></a>}</td>
             <td className="change">{e ? <EventChange e={e} /> : trial ?? describeOp(o.op)}</td>
             <td className="hide-m">{e ? <Signers s={s} e={e} /> : <Actor s={s} address={o.by} />}</td>
             <td className="note hide-m">{ago(o.timestamp)}</td>
-            <td className="mono hide-m right">{o.batchNo === undefined ? '' : <a className="link" href={`#batch/${o.batchNo}`}>#{o.batchNo}</a>}</td>
+            <td className="mono hide-m right tech-only">{o.batchNo === undefined ? '' : <a className="link" href={`#batch/${o.batchNo}`}>#{o.batchNo}</a>}</td>
           </tr>
         );
       })}
@@ -475,7 +511,7 @@ export function OpDetail({ s, id }: PageProps & { id: number }) {
   const card = e ? cardOf(e.rowId, s.ops) : undefined;
   return (
     <>
-      <Back href="#ops" label="Activity" />
+      <Back href="#ops" label="History" />
       <Section page title={`Change #${o.id}`} note={e ? undefined : `${actionName(o.op)} · ${describeOp(o.op)}`}>
         <KeyValues items={[
           ...(e ? [['Change', <EventChange e={e} />] as [string, ReactNode]] : []),

@@ -1,14 +1,20 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import type { ChainConfig, Snapshot } from './chain';
 import { actionName, describeOp, FIELD_NAMES, formatAmount, formatFee, formatField, formatGas, formatGasShort, formatTime, plural, toHex32 } from './format';
-import { cardOf, changeLabel, formatCard, members, pointsEvents, PROGRAM, unqueuedProposals, type Member, type PointsEvent, type UnqueuedProposal } from './points';
+import { cardOf, changeLabel, formatCard, members, pointsEvents, PROGRAM, trialChange, unqueuedProposals, type Member, type PointsEvent, type UnqueuedProposal } from './points';
 import { batchSlots, nextBatchSlots, type BatchView, type OpStatus, type OpView } from './replay';
 import { Actor, Details, Empty, Hash, K, KeyValues, OnChain, OpStatusLabel, Section, SlotBar, SlotLegend, STATUS, Table } from './ui';
 import type { Delivery } from './useIcm';
 import { atRefPrice, type PriceRef } from './usePriceRef';
 import { formatMs, rootKey, type ProofMetaMap } from './useProofMeta';
+import { HeroArt } from './art';
+import { L1Band, L1Tx } from './l1view';
+import type { L1Live, L1LiveState } from './l1live';
+import type { SchoolL1State } from './schoolL1';
 
 interface PageProps { s: Snapshot; cfg?: ChainConfig; meta?: ProofMetaMap; deliveries?: Record<string, Delivery>; priceRef?: PriceRef }
+/** The school L1 as both chains report it: what Fuji sent (l1) and what the L1 stored (l1Live). */
+interface L1Props { l1?: SchoolL1State; l1Live?: L1Live }
 
 /** Points events and members are derived once per snapshot. */
 function usePoints(s: Snapshot) {
@@ -20,7 +26,7 @@ function usePoints(s: Snapshot) {
 
 const average = (xs: bigint[]) => (xs.length ? xs.reduce((a, b) => a + b, 0n) / BigInt(xs.length) : undefined);
 
-export function Overview({ s, stale, cfg, meta = {}, priceRef, onCheck }: PageProps & { stale: boolean; onCheck?: () => Promise<number> }) {
+export function Overview({ s, stale, cfg, meta = {}, priceRef, l1, l1Live, onCheck }: PageProps & { stale: boolean; l1?: SchoolL1State; l1Live?: L1LiveState; onCheck?: () => Promise<number> }) {
   const { events, members: list } = usePoints(s);
   const latest = s.batches[s.batches.length - 1];
   const confirmMs = latest ? meta[rootKey(latest.newRoot)]?.confirmMs : undefined;
@@ -30,19 +36,25 @@ export function Overview({ s, stale, cfg, meta = {}, priceRef, onCheck }: PagePr
   const top = [...list].sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : a.rowId - b.rowId)).slice(0, 6);
   return (
     <>
-      <div className="page-title">
-        <h2>{PROGRAM.club} · {PROGRAM.name}</h2>
-        <p className="note">Volunteer points. Every change is signed, public and proven on {cfg?.network ?? 'chain'}.</p>
-      </div>
-      <Intro s={s} stale={stale} onCheck={onCheck} />
+      <section className="box hero" aria-labelledby="hero-title">
+        <div className="hero-copy">
+          <span className="eyebrow"><i className={stale ? 'dot off' : 'dot on'} aria-hidden="true" />{PROGRAM.club} · {cfg?.network ?? 'local chain'}</span>
+          <h1 id="hero-title">Every point,<br /><em>proven.</em></h1>
+          <Intro s={s} stale={stale} onCheck={onCheck} />
+        </div>
+        <div className="hero-art"><HeroArt /></div>
+      </section>
+      {cfg?.l1 && l1Live && <L1Band s={s} cfg={cfg} data={l1} live={l1Live} />}
       <section className="tiles four" aria-label="Summary">
         <a className="box tile" href="#members">
           <div className="lab">Members</div>
           <div className="big">{list.length}</div>
+          <p className="note">{plural(s.batchCount, 'proof')} so far</p>
         </a>
         <a className="box tile" href="#members">
           <div className="lab">Points held</div>
           <div className="big">{formatAmount(total)}</div>
+          <p className="note">avg {formatAmount(list.length ? total / BigInt(list.length) : 0n)} per member</p>
         </a>
         <a className="box tile" href="#admin">
           <div className="lab">Waiting</div>
@@ -50,9 +62,9 @@ export function Overview({ s, stale, cfg, meta = {}, priceRef, onCheck }: PagePr
           <SlotBar slots={nextBatchSlots(s.ops)} small />
         </a>
         <a className="box tile" href="#batches">
-          <div className="lab">One proof, up to {K} changes</div>
-          <div className="big fee">{formatGasShort(average(gas))} gas</div>
-          <p className="note mono">
+          <div className="lab">Gas per proof</div>
+          <div className="big fee">{formatGasShort(average(gas))}</div>
+          <p className="note">
             {[
               confirmMs !== undefined ? `confirmed in ${formatMs(confirmMs)}` : '',
               atRefPrice(average(gas), priceRef, cfg?.currency) ?? (cfg?.currency && fees.length ? `fee ${formatFee(average(fees), cfg.currency)}` : ''),
@@ -88,7 +100,7 @@ function Intro({ s, stale, onCheck }: { s: Snapshot; stale: boolean; onCheck?: (
     onCheck?.().then((ms) => setChecked(`Checked again in ${formatMs(ms)}`), () => setChecked('Could not reach the chain'));
   };
   return (
-    <section className={`box intro ${state}`} aria-labelledby="intro-title">
+    <div className={`intro ${state}`}>
       <div className="intro-head">
         <div className="verdict">
           <svg className="mark" viewBox="0 0 16 16" aria-hidden="true">
@@ -97,10 +109,10 @@ function Intro({ s, stale, onCheck }: { s: Snapshot; stale: boolean; onCheck?: (
             {state === 'unknown' && <path d="M3 8h10" />}
           </svg>
           <div>
-            <h1 id="intro-title">{verdict}</h1>
+            <h1>{verdict}</h1>
             {state !== 'unknown' && (
               <p className="note how">
-                This browser re-ran {plural(s.head, 'change')} from the chain. {state === 'match' ? 'Its root equals the contract\'s root.' : 'Its root differs from the contract\'s root.'}
+                {plural(s.head, 'change')} replayed in this browser{state === 'match' ? ', root matches' : ', root differs'}.
                 {onCheck && <> <button type="button" className="textlink" onClick={check}>{checked ?? 'Check again'}</button></>}
               </p>
             )}
@@ -112,31 +124,35 @@ function Intro({ s, stale, onCheck }: { s: Snapshot; stale: boolean; onCheck?: (
             <div><dt>Here</dt><dd><Hash value={toHex32(s.replayRoot)} /></dd></div>
           </dl>
         ) : (
-          <span className="pair mono">root <Hash value={toHex32(s.root)} /></span>
+          <span className="pair">Root <Hash value={toHex32(s.root)} /></span>
         )}
       </div>
       {latest && (
         <a className="intro-proof" href={`#batch/${latest.batchNo}`} aria-label={`Proof #${latest.batchNo}`}>
-          <span className="lab">Latest proof #{latest.batchNo} · {used} of {K} slots used</span>
+          <span className="lab">Latest proof #{latest.batchNo} · {used}/{K} slots</span>
           <SlotBar slots={batchSlots(latest, s.ops)} />
           <SlotLegend slots={batchSlots(latest, s.ops)} />
         </a>
       )}
       {s.issues.length > 0 && <ul className="issues">{s.issues.map((i) => <li key={i}>{i}</li>)}</ul>}
-    </section>
+    </div>
   );
 }
 
 function MemberTable({ list, max }: { list: Member[]; max: bigint }) {
   return (
-    <Table head={[['Card'], ['Points', 'right'], ['', 'bar-col hide-m'], ['Last change', 'hide-m'], ['', 'right']]}>
+    <Table className="t-members" head={[['Card'], ['Points', 'right'], ['Share', 'hide-m'], ['Last change', 'hide-m']]}>
       {list.map((m) => (
         <tr key={m.rowId}>
           <td className="mono"><a className="link" href={`#member/${m.rowId}`}>{formatCard(m.card)}</a></td>
           <td className="mono right points">{formatAmount(m.balance)}</td>
-          <td className="bar-col hide-m"><span className="bar"><i style={{ width: `${max > 0n ? Number((m.balance * 1000n) / max) / 10 : 0}%` }} /></span></td>
-          <td className="hide-m">{m.lastChange ? <EventChange e={m.lastChange} /> : '—'}</td>
-          <td className="right">{m.waiting > 0 && <span className="status pending"><i aria-hidden="true" />{m.waiting} waiting</span>}</td>
+          <td className="hide-m"><span className="bar"><i style={{ width: `${max > 0n ? Number((m.balance * 1000n) / max) / 10 : 0}%` }} /></span></td>
+          <td className="hide-m">
+            <span className="last">
+              {m.lastChange ? <EventChange e={m.lastChange} /> : '—'}
+              {m.waiting > 0 && <span className="status pending"><i aria-hidden="true" />{m.waiting} waiting</span>}
+            </span>
+          </td>
         </tr>
       ))}
     </Table>
@@ -197,6 +213,7 @@ export function Members({ s }: PageProps) {
   const max = list.reduce((a, m) => (m.balance > a ? m.balance : a), 0n);
   return (
     <Section
+      page
       title="Members"
       count={list.length}
       actions={(
@@ -239,8 +256,8 @@ export function MemberDetail({ s, id }: PageProps & { id: number }) {
           {!m && <span className="status pending"><i aria-hidden="true" />Not proven yet</span>}
         </div>
       </section>
-      <Section title="History" count={history.length + mine.length} note="Nothing here can be edited or removed. Taking points away keeps both signatures.">
-        <Table head={[['When', 'hide-m'], ['Change'], ['Signed by'], ['Balance', 'right'], ['Status'], ['Proof', 'right hide-m']]}>
+      <Section title="History" count={history.length + mine.length}>
+        <Table className="t-history" head={[['When', 'hide-m'], ['Change'], ['Signed by'], ['Balance', 'right'], ['Status'], ['Proof', 'right hide-m']]}>
           {mine.map((p) => <ProposalRow key={`c${p.proposal.id}`} s={s} p={p} balance={m?.balance} />)}
           {history.map((e) => (
             <tr key={e.op.id} className={e.kind === 'correct' ? 'flag' : undefined}>
@@ -319,11 +336,31 @@ function RelayStatus({ s, b, cfg, deliveries = {}, links }: { s: Snapshot; b: Ba
   );
 }
 
-export function Batches({ s, cfg, meta = {}, deliveries }: PageProps) {
+/** Where this proof's root stands on the school L1: sent by RootRelay on Fuji, stored by RootMirror there. */
+function L1RootStatus({ b, cfg, l1, l1Live, links }: { b: BatchView; cfg: ChainConfig; links?: boolean } & L1Props) {
+  const sent = l1?.roots.find((r) => r.batchNo === b.batchNo);
+  const stored = l1Live?.mirrored.find((m) => m.batchNo === b.batchNo);
+  if (!sent && !stored) {
+    if (!l1) return <span className="note">—</span>;
+    const first = l1.roots.reduce((min, r) => Math.min(min, r.batchNo), Infinity);
+    return <span className="note">{b.batchNo < first ? 'Before the L1 link' : l1.roots.some((r) => r.batchNo > b.batchNo) ? 'Superseded by a later root' : 'Not sent yet'}</span>;
+  }
   return (
-    <Section title="Proofs" count={s.batches.length}>
+    <span className="onchain">
+      {stored
+        ? <span className="status delivered"><i aria-hidden="true" />{links ? 'Stored by RootMirror on the L1' : 'Stored on the L1'}</span>
+        : <span className="status pending"><i aria-hidden="true" />{l1Live ? 'Sent, waiting for the relayer' : 'Sent'}</span>}
+      {links && sent && <a className="link ext" href={`${cfg.explorer}/tx/${sent.txHash}`} target="_blank" rel="noreferrer">sent ↗</a>}
+      {links && stored && <span className="note">L1 tx <L1Tx hash={stored.txHash} /></span>}
+    </span>
+  );
+}
+
+export function Batches({ s, cfg, meta = {}, deliveries, l1, l1Live }: PageProps & L1Props) {
+  return (
+    <Section page title="Proofs" count={s.batches.length}>
       {s.batches.length === 0 ? <Empty>No proofs yet.</Empty> : (
-        <Table head={[['Proof'], ['Slots'], ['Result'], ['Gas', 'right hide-m'], ...(cfg?.currency ? [['Fee', 'right'] as [string, string]] : []), ['Proved in', 'right hide-m'], ...(cfg?.icm ? [[`Root sent to ${cfg.icm.name}`, 'hide-m'] as [string, string]] : []), ['Transaction', 'hide-m']]}>
+        <Table head={[['Proof'], ['Slots'], ['Result'], ['Gas', 'right hide-m'], ...(cfg?.currency ? [['Fee', 'right'] as [string, string]] : []), ['Proved in', 'right hide-m'], ...(cfg?.l1 ? [[`Root on ${cfg.l1.name}`, 'hide-m'] as [string, string]] : []), ...(cfg?.icm ? [[`Root sent to ${cfg.icm.name}`, 'hide-m'] as [string, string]] : []), ['Transaction', 'hide-m']]}>
           {[...s.batches].reverse().map((b) => (
             <tr key={b.batchNo}>
               <td className="mono"><a className="link" href={`#batch/${b.batchNo}`}>#{b.batchNo}</a></td>
@@ -332,6 +369,7 @@ export function Batches({ s, cfg, meta = {}, deliveries }: PageProps) {
               <td className="mono right hide-m">{formatGas(b.gasUsed)}</td>
               {cfg?.currency && <td className="mono right">{formatFee(b.fee, cfg.currency)}</td>}
               <td className="mono right hide-m">{formatMs(meta[rootKey(b.newRoot)]?.provingMs)}</td>
+              {cfg?.l1 && <td className="hide-m"><L1RootStatus b={b} cfg={cfg} l1={l1} l1Live={l1Live} /></td>}
               {cfg?.icm && <td className="hide-m"><RelayStatus s={s} b={b} cfg={cfg} deliveries={deliveries} /></td>}
               <td className="hide-m"><TxLink hash={b.txHash} cfg={cfg} /></td>
             </tr>
@@ -342,7 +380,7 @@ export function Batches({ s, cfg, meta = {}, deliveries }: PageProps) {
   );
 }
 
-export function BatchDetail({ s, batchNo, cfg, meta = {}, deliveries, priceRef }: PageProps & { batchNo: number }) {
+export function BatchDetail({ s, batchNo, cfg, meta = {}, deliveries, priceRef, l1, l1Live }: PageProps & L1Props & { batchNo: number }) {
   const b = s.batches.find((x) => x.batchNo === batchNo);
   if (!b) return <Missing what={`Proof #${batchNo}`} back="batches" />;
   const ops = s.ops.filter((o) => o.batchNo === batchNo);
@@ -351,10 +389,10 @@ export function BatchDetail({ s, batchNo, cfg, meta = {}, deliveries, priceRef }
   return (
     <>
       <Back href="#batches" label="All proofs" />
-      <Section title={`Proof #${b.batchNo}`} note={formatTime(b.timestamp)}>
-        <div className="box padded"><SlotBar slots={slots} /><SlotLegend slots={slots} /></div>
+      <Section page title={`Proof #${b.batchNo}`} note={formatTime(b.timestamp)}>
+        <div className="box padded slot-panel"><SlotBar slots={slots} /><SlotLegend slots={slots} /></div>
       </Section>
-      <section className="tiles four" aria-label="Cost and timing">
+      <section className="tiles fit" aria-label="Cost and timing">
         {cfg?.currency && (
           <div className="box tile">
             <div className="lab">Fee paid</div>
@@ -369,6 +407,7 @@ export function BatchDetail({ s, batchNo, cfg, meta = {}, deliveries, priceRef }
       <KeyValues items={[
         ['Transaction', <OnChain value={b.txHash} kind="tx" />],
         ['Root after', <Hash value={toHex32(b.newRoot)} />],
+        ...(cfg?.l1 ? [[`Root on ${cfg.l1.name} (ICM)`, <L1RootStatus b={b} cfg={cfg} l1={l1} l1Live={l1Live} links />] as [string, ReactNode]] : []),
         ...(cfg?.icm ? [[`Root sent to ${cfg.icm.name} (ICM)`, <RelayStatus s={s} b={b} cfg={cfg} deliveries={deliveries} links />] as [string, ReactNode]] : []),
       ]} />
       <Section title="Changes" count={ops.length}><ChangesTable s={s} ops={ops} /></Section>
@@ -384,6 +423,7 @@ export function Ops({ s }: PageProps) {
   const shown = [...s.ops].reverse().filter((o) => filter === 'all' || o.status === filter);
   return (
     <Section
+      page
       title="Activity"
       count={s.ops.length}
       actions={
@@ -406,16 +446,18 @@ function ChangesTable({ s, ops }: { s: Snapshot; ops: OpView[] }) {
   const all = s.ops;
   const byOp = useMemo(() => new Map(pointsEvents(all, s.proposals).map((e) => [e.op.id, e])), [all, s.proposals]);
   return (
-    <Table head={[['Change'], ['Status'], ['Member'], ['Details'], ['Signed by', 'hide-m'], ['When', 'hide-m'], ['Proof', 'hide-m right']]}>
+    <Table className="t-changes" head={[['#'], ['Status'], ['Member'], ['Change'], ['Signed by', 'hide-m'], ['When', 'hide-m'], ['Proof', 'hide-m right']]}>
       {ops.map((o) => {
         const e = byOp.get(o.id);
         const card = e ? cardOf(e.rowId, all) : undefined;
+        // A visitor's trial card: same ledger, its own table. Named here so it does not read as a raw row.
+        const trial = e ? null : trialChange(o.op, all);
         return (
           <tr key={o.id} className={e?.kind === 'correct' ? 'flag' : undefined}>
             <td className="mono"><a className="link" href={`#op/${o.id}`}>#{o.id}</a></td>
             <td>{e ? <EventStatus e={e} /> : <OpStatusLabel status={o.status} />}</td>
-            <td className="mono">{e && card !== undefined ? <a className="link" href={`#member/${e.rowId}`}>{formatCard(card)}</a> : <a className="link note" href={`#row/${o.op[1]}`}>row {o.op[1].toString()}</a>}</td>
-            <td className="change">{e ? <EventChange e={e} /> : describeOp(o.op)}</td>
+            <td className="mono">{e && card !== undefined ? <a className="link" href={`#member/${e.rowId}`}>{formatCard(card)}</a> : <a className="link note" href={`#row/${o.op[1]}`}>{trial ? 'trial' : 'row'} {o.op[1].toString()}</a>}</td>
+            <td className="change">{e ? <EventChange e={e} /> : trial ?? describeOp(o.op)}</td>
             <td className="hide-m">{e ? <Signers s={s} e={e} /> : <Actor s={s} address={o.by} />}</td>
             <td className="note hide-m">{ago(o.timestamp)}</td>
             <td className="mono hide-m right">{o.batchNo === undefined ? '' : <a className="link" href={`#batch/${o.batchNo}`}>#{o.batchNo}</a>}</td>
@@ -434,7 +476,7 @@ export function OpDetail({ s, id }: PageProps & { id: number }) {
   return (
     <>
       <Back href="#ops" label="Activity" />
-      <Section title={`Change #${o.id}`} note={e ? undefined : `${actionName(o.op)} · ${describeOp(o.op)}`}>
+      <Section page title={`Change #${o.id}`} note={e ? undefined : `${actionName(o.op)} · ${describeOp(o.op)}`}>
         <KeyValues items={[
           ...(e ? [['Change', <EventChange e={e} />] as [string, ReactNode]] : []),
           ['Status', e ? <EventStatus e={e} /> : <OpStatusLabel status={o.status} />],
@@ -464,6 +506,7 @@ export function Data({ s }: PageProps) {
     <>
       <Back href="#members" label="Members" />
       <Section
+        page
         title="Raw rows"
         count={shown.length}
         actions={tables.length > 0 && (
@@ -499,7 +542,7 @@ export function RowDetail({ s, id }: PageProps & { id: number }) {
   return (
     <>
       <Back href="#data" label="Raw rows" />
-      <Section title={`Row ${id}`} note={row ? `Table ${formatField(row.table)}` : queuedOnly ? 'Waiting for its first proof' : 'Deleted'}>
+      <Section page title={`Row ${id}`} note={row ? `Table ${formatField(row.table)}` : queuedOnly ? 'Waiting for its first proof' : 'Deleted'}>
         {row ? (
           <Table head={FIELD_NAMES.map((n) => [n, 'right'] as [string, string])}>
             <tr>{row.fields.map((f, i) => <td key={i} className={f === 0n ? 'mono right zero' : 'mono right'}>{formatField(f)}</td>)}</tr>

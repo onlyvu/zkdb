@@ -1,6 +1,5 @@
 {
   "name": "@zkdb/dashboard",
-  "author": "Vu Viet Anh",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -20,11 +19,14 @@
     "flow:fuji": "tsx scripts/flow-fuji.ts",
     "deploy:l1": "tsx scripts/deploy-l1.ts",
     "flow:l1": "tsx scripts/flow-l1.ts",
-    "perms:l1": "tsx scripts/perms-l1.ts"
+    "perms:l1": "tsx scripts/perms-l1.ts",
+    "trial:setup": "tsx scripts/fuji-admin.ts trial-setup",
+    "governor": "tsx scripts/fuji-admin.ts governor"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "^5.3.0",
-    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@fontsource/geist-mono": "^5.3.0",
+    "@fontsource/geist-sans": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@zkdb/core": "*",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

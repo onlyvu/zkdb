@@ -1,7 +1,7 @@
 [package]
 name = "batch"
 type = "bin"
-authors = ["Vu Viet Anh"]
+authors = ["zkDB"]
 
 [dependencies]
 zkdb = { path = "../zkdb" }

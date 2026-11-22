@@ -89,7 +89,8 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? 'The dashboard server is not responding.');
+  // The server's error code travels with the message, so a page can say something specific about it.
+  if (!res.ok) throw Object.assign(new Error(data.error ?? 'The dashboard server is not responding.'), { code: data.code as string | undefined });
   return data as T;
 }
 
@@ -128,3 +129,17 @@ export async function listDemoCards(): Promise<{ card: string; secret: `0x${stri
 /** Hands a zero-knowledge claim to the server's relayer, which pays the gas. The card secret is not part of it. */
 export const relayClaim = (body: { proof: `0x${string}`; perkId: number; nullifier: `0x${string}`; pickup: `0x${string}` }) =>
   api<{ txHash: `0x${string}`; gasUsed: string }>('/api/claims/relay', body);
+
+/** The same claim, sent to the school L1 by the server's claim relayer. The hash it returns is an L1 transaction. */
+export const relayClaimL1 = (body: { proof: `0x${string}`; perkId: number; nullifier: `0x${string}`; pickup: `0x${string}` }) =>
+  api<{ txHash: `0x${string}`; gasUsed: string; messageId?: `0x${string}` }>('/api/claims/relay-l1', body);
+
+/** Where the server can send a claim. A server that predates the L1 route answers 404, which means Fuji only. */
+export const claimTargets = () => api<{ fuji: boolean; l1: boolean }>('/api/claims/targets').catch(() => ({ fuji: true, l1: false }));
+
+/** Try-it mode: the server's trial key pays for the card, the award and the batch proof. */
+export interface TrialInfo { enabled: boolean; table?: string; perkId?: number; points?: string; writer?: string; cardsLeftThisHour?: number; relayer?: boolean }
+export interface TrialTx { step: 'insert' | 'award'; hash: `0x${string}`; gasUsed: string }
+export const trialInfo = () => api<TrialInfo>('/api/trial');
+export const trialCard = (cardKey: `0x${string}`) => api<{ rowId: string; card: string; points: string; txs: TrialTx[] }>('/api/trial/card', { cardKey });
+export const trialBatch = () => api<{ txHash?: `0x${string}`; gasUsed?: string; newRoot?: string; provingMs?: number; consumed?: number; alreadyProven?: boolean; relayed?: { to: string; txHash: `0x${string}`; gasUsed: string }[] }>('/api/trial/batch', {});

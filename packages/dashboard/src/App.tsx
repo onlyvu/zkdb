@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Admin } from './admin';
 import { Perks } from './perks';
-import { SchoolL1 } from './l1view';
+import { Trial } from './trial';
+import { LogoMark } from './art';
+import { L1TxDetail, SchoolL1 } from './l1view';
+import { useL1Live, type L1LiveState } from './l1live';
+import { L1_UPGRADE_ACCOUNTS } from './l1seed';
 import { useSchoolL1, type SchoolL1State } from './schoolL1';
 import { rolesOf } from './roles';
 import { useIcmDeliveries } from './useIcm';
@@ -32,19 +36,18 @@ function NotConfigured() {
     <main className="wrap solo">
       <Logo />
       <section className="box message">
-        <h2>No contract to watch yet</h2>
-        <p>Run the local demo. It starts anvil, deploys the contracts and opens this dashboard:</p>
+        <h2>No ledger connected</h2>
         <pre>npm run demo -w @zkdb/dashboard</pre>
-        <p>Or set <code>VITE_ZKDB_ADDRESS</code> and <code>VITE_RPC_URL</code> in <code>packages/dashboard/.env.local</code>.</p>
+        <p className="note">Or set <code>VITE_ZKDB_ADDRESS</code> and <code>VITE_RPC_URL</code> in <code>.env.local</code>.</p>
       </section>
     </main>
   );
 }
 
 /** One name everywhere: zkDB. What it is here, a points ledger, sits beside it in small type. */
-const Logo = () => <a className="logo" href="#overview">zkDB<small>points ledger</small></a>;
+const Logo = () => <a className="logo" href="#overview" aria-label="zkDB home"><LogoMark />zkDB</a>;
 
-const NAV: [string, string][] = [['overview', 'Overview'], ['members', 'Members'], ['ops', 'Activity'], ['batches', 'Proofs'], ['perks', 'Perks'], ['l1', 'School L1'], ['admin', 'Manage']];
+const NAV: [string, string][] = [['overview', 'Overview'], ['try', 'Try it'], ['members', 'Members'], ['ops', 'Activity'], ['batches', 'Proofs'], ['perks', 'Perks'], ['l1', 'L1'], ['admin', 'Manage']];
 
 function useRoute(): string {
   const read = () => location.hash.slice(1) || 'overview';
@@ -64,12 +67,13 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
   const [signingIn, setSigningIn] = useState(false);
   const stale = !!error;
   const section = route.split('/')[0];
-  const active = { batch: 'batches', op: 'ops', row: 'members', data: 'members', member: 'members' }[section] ?? section;
+  const active = { batch: 'batches', op: 'ops', row: 'members', data: 'members', member: 'members', l1tx: 'l1' }[section] ?? section;
   const meta = useProofMeta(snapshot?.batchCount);
   const deliveries = useIcmDeliveries(cfg.icm, snapshot?.relays ?? []);
   const priceRef = usePriceRef(cfg);
   const l1 = useSchoolL1(cfg.rpcUrl, cfg.l1, cfg.logRange);
-  const nav = NAV.filter(([id]) => (id !== 'perks' || cfg.gate) && (id !== 'l1' || cfg.l1));
+  const l1Live = useL1Live(cfg.l1?.live, L1_UPGRADE_ACCOUNTS);
+  const nav = NAV.filter(([id]) => (id !== 'perks' || cfg.gate) && (id !== 'try' || cfg.gate) && (id !== 'l1' || cfg.l1));
 
   return (
     <>
@@ -82,7 +86,7 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
         {snapshot && <Search s={snapshot} />}
         <div className="top-right">
           {snapshot && (
-            <div className="live mono">
+            <div className="live">
               {cfg.network && <span className="net">{cfg.network}</span>}
               <i className={stale ? 'dot off' : 'dot on'} aria-hidden="true" />
               {stale ? 'Offline' : 'Live'}<span className="blk"> · block {snapshot.block.toString()}</span>
@@ -103,10 +107,10 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
         {!snapshot && !error && (
           <section className="box loading" aria-busy="true">
             <div className="slots pulse" aria-hidden="true">{Array.from({ length: 16 }, (_, i) => <i key={i} style={{ animationDelay: `${i * 60}ms` }} />)}</div>
-            <p className="note mono">Reading {cfg.network ?? 'the chain'}…</p>
+            <p className="note">Reading {cfg.network ?? 'the chain'}…</p>
           </section>
         )}
-        {snapshot && <Page route={route} s={snapshot} stale={stale} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} l1={l1} auth={auth} onSignIn={() => setSigningIn(true)} onChanged={refresh} onRecheck={recheck} />}
+        {snapshot && <Page route={route} s={snapshot} stale={stale} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} l1={l1} l1Live={l1Live} auth={auth} onSignIn={() => setSigningIn(true)} onChanged={refresh} onRecheck={recheck} />}
       </main>
 
       {signingIn && snapshot && <SignInDialog cfg={cfg} s={snapshot} auth={auth} onClose={() => setSigningIn(false)} />}
@@ -114,14 +118,16 @@ function Dashboard({ cfg }: { cfg: ChainConfig }) {
   );
 }
 
-function Page({ route, s, stale, cfg, meta, deliveries, priceRef, l1, auth, onSignIn, onChanged, onRecheck }: { route: string; s: Snapshot; stale: boolean; cfg: ChainConfig; meta: ProofMetaMap; deliveries: Record<string, Delivery>; priceRef?: PriceRef; l1: { data?: SchoolL1State; error?: string }; auth: Auth; onSignIn: () => void; onChanged: () => void; onRecheck: () => Promise<number> }) {
+function Page({ route, s, stale, cfg, meta, deliveries, priceRef, l1, l1Live, auth, onSignIn, onChanged, onRecheck }: { route: string; s: Snapshot; stale: boolean; cfg: ChainConfig; meta: ProofMetaMap; deliveries: Record<string, Delivery>; priceRef?: PriceRef; l1: { data?: SchoolL1State; error?: string }; l1Live: L1LiveState; auth: Auth; onSignIn: () => void; onChanged: () => void; onRecheck: () => Promise<number> }) {
   const [view, arg] = route.split('/');
   const id = Number(arg);
   switch (view) {
-    case 'batches': return <Batches s={s} cfg={cfg} meta={meta} deliveries={deliveries} />;
-    case 'batch': return <BatchDetail s={s} batchNo={id} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} />;
-    case 'l1': return cfg.l1 ? <SchoolL1 s={s} cfg={cfg} data={l1.data} error={l1.error} /> : null;
-    case 'perks': return <Perks s={s} cfg={cfg} wallet={auth.wallet} onChanged={onChanged} />;
+    case 'batches': return <Batches s={s} cfg={cfg} meta={meta} deliveries={deliveries} l1={l1.data} l1Live={l1Live.data} />;
+    case 'batch': return <BatchDetail s={s} batchNo={id} cfg={cfg} meta={meta} deliveries={deliveries} priceRef={priceRef} l1={l1.data} l1Live={l1Live.data} />;
+    case 'l1': return cfg.l1 ? <SchoolL1 s={s} cfg={cfg} data={l1.data} error={l1.error} live={l1Live} wallet={auth.wallet} onChanged={onChanged} /> : null;
+    case 'l1tx': return <L1TxDetail cfg={cfg} hash={arg ?? ''} />;
+    case 'try': return <Trial cfg={cfg} onChanged={onChanged} />;
+    case 'perks': return <Perks s={s} cfg={cfg} wallet={auth.wallet} l1={l1.data} l1Live={l1Live.data} onChanged={onChanged} />;
     case 'ops': return <Ops s={s} />;
     case 'op': return <OpDetail s={s} id={id} />;
     case 'members': return <Members s={s} />;
@@ -129,7 +135,7 @@ function Page({ route, s, stale, cfg, meta, deliveries, priceRef, l1, auth, onSi
     case 'data': return <Data s={s} />;
     case 'row': return <RowDetail s={s} id={id} />;
     case 'admin': return <Admin s={s} cfg={cfg} address={auth.address} wallet={auth.wallet} onSignIn={onSignIn} onChanged={onChanged} />;
-    default: return <Overview s={s} stale={stale} cfg={cfg} meta={meta} priceRef={priceRef} onCheck={onRecheck} />;
+    default: return <Overview s={s} stale={stale} cfg={cfg} meta={meta} priceRef={priceRef} l1={l1.data} l1Live={l1Live} onCheck={onRecheck} />;
   }
 }
 
@@ -153,7 +159,6 @@ function Search({ s }: { s: Snapshot }) {
       <label className="sr-only" htmlFor="search">Search rows, changes, proofs and hashes</label>
       <input
         id="search"
-        className="mono"
         value={query}
         onChange={(e) => { setQuery(e.target.value); setError(null); }}
         placeholder="Card, proof, change or tx"
@@ -224,7 +229,7 @@ function SignInDialog({ cfg, s, auth, onClose }: { cfg: ChainConfig; s: Snapshot
           ))}
         </div>
       )}
-      {!browser && dev.length === 0 && <p className="tx error">No wallet found. Install a browser wallet to sign in.</p>}
+      {!browser && dev.length === 0 && <p className="tx error">No wallet found.</p>}
       {busy && <p className="tx busy" role="status">Waiting for your signature…</p>}
       {error && <p className="tx error" role="alert">{error}</p>}
     </dialog>

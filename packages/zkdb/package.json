@@ -1,6 +1,5 @@
 {
   "name": "@zkdb/core",
-  "author": "Vu Viet Anh",
   "version": "0.1.0",
   "private": true,
   "type": "module",

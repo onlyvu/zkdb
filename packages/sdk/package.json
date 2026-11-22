@@ -1,0 +1,23 @@
+{
+  "name": "@zkdb/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "quickstart": "tsx examples/quickstart.ts"
+  },
+  "dependencies": {
+    "@zkdb/core": "*",
+    "viem": "^2.57.15"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

@@ -1,6 +1,5 @@
 {
   "name": "zkdb",
-  "author": "Vu Viet Anh",
   "private": true,
   "workspaces": ["packages/*"],
   "engines": { "node": ">=20" }

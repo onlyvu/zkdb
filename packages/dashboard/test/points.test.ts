@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatAmount, formatField } from '../src/format';
-import { changeLabel, formatCard, members, pointsEvents, PROGRAM, REASONS, unqueuedProposals } from '../src/points';
+import { changeLabel, formatCard, members, pointsEvents, PROGRAM, REASONS, TRIAL_TABLE, trialChange, unqueuedProposals } from '../src/points';
 import type { OpStatus, OpView, RowView } from '../src/replay';
 import { resolveSearch } from '../src/search';
 
@@ -122,5 +122,22 @@ describe('proposals and signers', () => {
     expect(waiting).toMatchObject({ kind: 'redeem', amount: 500n, reason: 'Club T-shirt' });
     const evs = pointsEvents(ops, [correction(0, 0, 500n, 'approved', 2, 4n)]);
     expect(evs[2]).toMatchObject({ kind: 'redeem', amount: -500n, after: 100n, cosigner: '0xAuditor' });
+  });
+});
+
+describe('trial cards in the activity list', () => {
+  const insert = (id: number, rowId: bigint, table: bigint): OpView => ({ id, op: [1n, rowId, table, rowId, 0n, 77n, 0n, 0n, 0n], by: '0x0', timestamp: 0, txHash: '0x0', status: 'applied' } as unknown as OpView);
+  const add = (id: number, rowId: bigint, amount: bigint): OpView => ({ id, op: [3n, rowId, 1n, amount, 30n, 0n, 0n, 0n, 0n], by: '0x0', timestamp: 0, txHash: '0x0', status: 'applied' } as unknown as OpView);
+  const ops = [insert(0, 0n, PROGRAM.table), insert(1, 1n, TRIAL_TABLE), add(2, 1n, 150n), add(3, 0n, 150n)];
+
+  it('names a trial card and its award instead of showing raw fields', () => {
+    expect(trialChange(ops[1].op, ops)).toBe('Trial card added');
+    expect(trialChange(ops[2].op, ops)).toBe('+150 Trial');
+  });
+
+  it('leaves the club table alone', () => {
+    expect(trialChange(ops[0].op, ops)).toBeNull();
+    expect(trialChange(ops[3].op, ops)).toBeNull();
+    expect(pointsEvents(ops).map((e) => e.rowId)).toEqual([0, 0]);
   });
 });

@@ -50,7 +50,7 @@ function memberKey(name: string): PrivateKeyAccount {
 
 const admin = acct(process.env.DEPLOYER_KEY!);
 const claimRelayer = acct(process.env.RELAYER_KEY!);
-const outsider = acct(readFileSync(process.env.OUTSIDER_KEY_FILE ?? `${homedir()}/.zkdb/outsider.key`, 'utf8').trim());
+const outsider = acct(readFileSync(process.env.OUTSIDER_KEY_FILE ?? `${homedir()}/.avalanche-team1/outsider.key`, 'utf8').trim());
 
 interface Step { step: string; who: string; address: Address; result: 'ok' | 'refused'; tx?: Hex; detail: string }
 const steps: Step[] = [];

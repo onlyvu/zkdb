@@ -8,7 +8,7 @@ import { nextBatchSlots } from './replay';
 import { Actor, Details, Empty, Hash, K, OnChain, KeyValues, Section, SlotBar } from './ui';
 import { proveNextBatch, recordConfirmation, type Wallet } from './wallet';
 import { formatMs, META_EVENT } from './useProofMeta';
-import { BALANCE_FIELD, cardOf, EARN_REASONS, formatCard, members, pointsEvents, PROGRAM, reasonLabel, REASON_SLOT, REASONS, SPEND_REASONS, type ReasonKey } from './points';
+import { BALANCE_FIELD, cardOf, EARN_REASONS, formatCard, members, pointsEvents, PROGRAM, reasonLabel, REASON_SLOT, REASONS, SPEND_REASONS, TRIAL_TABLE, type ReasonKey } from './points';
 import { formatAmount } from './format';
 import { rolesOf } from './roles';
 import { ago } from './views';
@@ -18,7 +18,7 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 interface Sent { hash: `0x${string}`; confirmMs: number }
 type TxState = { kind: 'idle' } | { kind: 'busy'; label: string } | { kind: 'done'; label: string; hash?: string } | { kind: 'error'; message: string };
 
-function useTx(cfg: ChainConfig, wallet: Wallet | null, onDone: () => void) {
+export function useTx(cfg: ChainConfig, wallet: Wallet | null, onDone: () => void) {
   const [state, setState] = useState<TxState>({ kind: 'idle' });
 
   /** Simulates first, so a call the contract would reject explains itself and costs no gas. */
@@ -45,7 +45,7 @@ function useTx(cfg: ChainConfig, wallet: Wallet | null, onDone: () => void) {
   return { state, setState, send, run };
 }
 
-function TxStatus({ state }: { state: TxState }) {
+export function TxStatus({ state }: { state: TxState }) {
   if (state.kind === 'idle') return null;
   if (state.kind === 'busy') return <p className="tx busy" role="status">{state.label}</p>;
   if (state.kind === 'error') return <p className="tx error" role="alert">{state.message}</p>;
@@ -71,9 +71,16 @@ export function Admin({ s, cfg, address, wallet, onSignIn, onChanged }: {
   const isAuditor = roles.includes('Auditor');
   return (
     <>
+      <div className="page-title">
+        <h2>Manage, <em>two keys at a time.</em></h2>
+        <p className="note">Award, correct and prove. Taking points away needs the auditor.</p>
+      </div>
       {!address && (
         <section className="box padded signin-prompt">
-          <h2>Sign in to make changes</h2>
+          <div>
+            <h2>Sign in to make changes</h2>
+            <p className="note">With the treasurer's, the auditor's or the owner's wallet. Everything on this page can be read without one.</p>
+          </div>
           <button type="button" className="primary" onClick={onSignIn}>Sign in</button>
         </section>
       )}
@@ -86,6 +93,7 @@ export function Admin({ s, cfg, address, wallet, onSignIn, onChanged }: {
       {address && roles.includes('Viewer') && (
         <section className="box padded">
           <h2>Read-only account</h2>
+          <p className="note">This wallet holds no role on the ledger. The roles below say which wallets do.</p>
         </section>
       )}
       <div className="admin-grid">
@@ -94,7 +102,7 @@ export function Admin({ s, cfg, address, wallet, onSignIn, onChanged }: {
         {isOwner && wallet && <AccessPanel cfg={cfg} wallet={wallet} s={s} onChanged={onChanged} />}
       </div>
       <ProposalsPanel cfg={cfg} wallet={wallet} s={s} onChanged={onChanged} />
-      {isOwner && wallet && <AccessOverview s={s} />}
+      <AccessOverview s={s} />
       {isWriter && wallet && (
         <Details label="Raw operations">
           <WritePanel cfg={cfg} wallet={wallet} s={s} onChanged={onChanged} />
@@ -116,7 +124,7 @@ function ProposalsPanel({ cfg, wallet, s, onChanged }: { cfg: ChainConfig; walle
     <Section
       title="Waiting for the auditor"
       count={open.length}
-      note={auditor ? 'The treasurer can award points alone. Taking points away or overwriting a balance needs the auditor\'s signature too.' : 'This table has no auditor: the treasurer can overwrite a balance alone.'}
+      note={auditor ? 'Awards need one signature. Taking points away needs the auditor too.' : 'No auditor on this table.'}
     >
       {open.length === 0 ? <Empty>None waiting.</Empty> : (
         <ul className="corrections box">
@@ -160,17 +168,29 @@ function ProposalItem({ c, cfg, wallet, s, auditor, before, onChanged }: { c: Pr
   );
 }
 
+/** Who holds which role, read from the contract. Public: a member can see whose signatures a change needs. */
 function AccessOverview({ s }: { s: Snapshot }) {
+  const treasurer = s.tableOwners.find((t) => t.tableId === PROGRAM.table)?.writer;
+  const auditor = s.tableAuditors.find((t) => t.tableId === PROGRAM.table)?.auditor;
+  const others = s.writers.filter((w) => !treasurer || !same(w, treasurer));
+  const g = s.governor;
+  const held = (address: string | undefined, can: string): ReactNode => (address
+    ? <span className="stack"><OnChain value={address} kind="address" /><span className="note">{can}</span></span>
+    : 'Nobody');
   return (
-    <Section title="Roles">
+    <Section title="Roles" note={g
+      ? `Read from the contract. Changing one needs ${g.threshold} of the owner's ${g.signers.length} signers and a ${g.delay}-second public wait.`
+      : 'Read from the contract. Only the owner can change them, and each change is an event anyone can read.'}>
       <KeyValues items={[
-        ['Writers', s.writers.length ? <span className="chips">{s.writers.map((w) => <Hash key={w} value={w} />)}</span> : 'None'],
-        ...s.tableOwners.map((t): [string, ReactNode] => [`Table ${formatField(t.tableId)}`, <Hash value={t.writer} />]),
-        ...s.tableAuditors.map((t): [string, ReactNode] => [`Table ${formatField(t.tableId)} auditor`, <Hash value={t.auditor} />]),
+        ['Treasurer', held(treasurer, 'Awards points and adds members alone. Proposes redemptions and corrections.')],
+        ['Auditor', held(auditor, 'Co-signs or declines each redemption and correction.')],
+        ['Owner', held(s.owner, g ? `A governor contract: ${g.threshold} of ${g.signers.length} signers, then a ${g.delay} s wait. Names the treasurer and the auditor.` : 'Names the treasurer and the auditor.')],
+        ...(others.length ? [['Other writers', <span className="chips">{others.map((w) => <Hash key={w} value={w} />)}</span>] as [string, ReactNode]] : []),
+        ...s.tableOwners.filter((t) => t.tableId !== PROGRAM.table).map((t): [string, ReactNode] => [t.tableId === TRIAL_TABLE ? `Trial table (${formatField(t.tableId)})` : `Table ${formatField(t.tableId)}`, <Hash value={t.writer} />]),
+        ...s.tableAuditors.filter((t) => t.tableId !== PROGRAM.table).map((t): [string, ReactNode] => [`Table ${formatField(t.tableId)} auditor`, <Hash value={t.auditor} />]),
       ]} />
       <Details>
         <KeyValues items={[
-          ['Owner', <OnChain value={s.owner} kind="address" />],
           ['Database contract', <OnChain value={s.address} kind="address" />],
           ['Verifier', <OnChain value={s.verifier} kind="address" />],
         ]} />
@@ -464,16 +484,27 @@ function BatchPanel({ cfg, wallet, s, onChanged }: PanelProps) {
     // Display-only timing; the server checks the transaction really published this root before storing it.
     await recordConfirmation({ newRoot: proven.newRoot, txHash: sent.hash, confirmMs: sent.confirmMs }).catch(() => {});
     dispatchEvent(new Event(META_EVENT));
-    if (cfg.icm) {
-      // The new root goes to the other L1 over ICM. The relay contract reads it from ZkDB, not from this page.
+    // The new root goes out over ICM: to the school L1 first, where claims are checked against it, then to the
+    // other L1. Each relay contract reads the root from ZkDB, not from this page.
+    const relays = [cfg.l1 && { name: cfg.l1.name, address: cfg.l1.relay }, cfg.icm && { name: cfg.icm.name, address: cfg.icm.relay }].filter((r): r is { name: string; address: Address } => !!r);
+    if (relays.length) {
       const accepted = `Proof accepted · ${plural(proven.consumed, 'change')} · proved in ${formatMs(proven.provingMs)} · confirmed in ${formatMs(sent.confirmMs)}`;
-      tx.setState({ kind: 'busy', label: `${accepted}. Sending the root to ${cfg.icm.name}…` });
-      try {
-        await tx.send('relay', [], `${accepted} · root sent to ${cfg.icm.name} over ICM`, { address: cfg.icm.relay, abi: relayAbi as Abi });
-      } catch {
-        // The proof is already accepted. Anyone can call relay() later; the next proof's root supersedes this one.
-        tx.setState({ kind: 'done', label: `${accepted} · the root was not sent to ${cfg.icm.name} this time`, hash: sent.hash });
+      const reached: string[] = [];
+      for (const r of relays) {
+        tx.setState({ kind: 'busy', label: `${accepted}. Sending the root to ${r.name}…` });
+        try {
+          await tx.send('relay', [], accepted, { address: r.address, abi: relayAbi as Abi });
+          reached.push(r.name);
+        } catch {
+          // The proof is already accepted. Anyone can call relay() later; the next proof's root supersedes this one.
+        }
       }
+      const missed = relays.filter((r) => !reached.includes(r.name)).map((r) => r.name);
+      tx.setState({
+        kind: 'done',
+        hash: sent.hash,
+        label: `${accepted} · ${[reached.length ? `root sent to ${reached.join(' and ')} over ICM` : '', missed.length ? `not sent to ${missed.join(' or ')} this time` : ''].filter(Boolean).join(', ')}`,
+      });
     }
   });
 

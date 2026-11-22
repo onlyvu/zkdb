@@ -8,6 +8,11 @@ import {IHonkVerifier} from "./IHonkVerifier.sol";
 /// A table can have an auditor. On such a table one signer can only add: insert a row, or ADD to a field. Anything
 /// that overwrites or takes away (SET, SUB, DELETE) is a proposal from the table's writer, and it enters the queue
 /// only when the auditor approves the same op.
+///
+/// A table can also have a solo limit on one field (the balance): one signer may ADD at most `maxPerOp` to it per op
+/// and at most `maxPerDay` in total per UTC day, counting the value an INSERT starts the field at. Anything above is
+/// a proposal that needs the auditor, like SET, SUB and DELETE. Without a limit, ADD and INSERT are one-signer as
+/// before.
 contract ZkDB {
     uint256 public constant K = 16;
     uint256 public constant OP_WIDTH = 9;
@@ -15,6 +20,7 @@ contract ZkDB {
     uint256 internal constant P = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
     uint8 internal constant OP_INSERT = 1;
     uint8 internal constant OP_SET = 2;
+    uint8 internal constant OP_ADD = 3;
     uint8 internal constant OP_SUB = 4;
     uint8 internal constant OP_DELETE = 5;
 
@@ -27,6 +33,18 @@ contract ZkDB {
     mapping(uint256 => address) public tableAuditor;
     /// Table each row was inserted into. Access to a row follows its table, so a new table owner inherits the rows.
     mapping(uint64 => uint256) public rowTable;
+
+    struct SoloLimit {
+        bool on;
+        uint8 field;
+        uint64 maxPerOp;
+        uint64 maxPerDay;
+    }
+
+    /// Limit on what one signer may add to a table's balance field without the auditor. Off by default.
+    mapping(uint256 => SoloLimit) public soloLimit;
+    /// table => UTC day number => amount added by one signer that day (ADD deltas plus INSERT starting values).
+    mapping(uint256 => mapping(uint256 => uint256)) public soloAdded;
 
     struct Proposal {
         bytes32 opHash;
@@ -50,6 +68,7 @@ contract ZkDB {
     event WriterSet(address indexed writer, bool allowed);
     event TableOwnerSet(uint256 indexed tableId, address indexed writer);
     event TableAuditorSet(uint256 indexed tableId, address indexed auditor);
+    event SoloLimitSet(uint256 indexed tableId, bool on, uint8 field, uint64 maxPerOp, uint64 maxPerDay);
     /// @param by the account that asked for the change: the sender, or the proposer of an approved change.
     event OpQueued(uint64 indexed opId, address indexed by, uint256[9] op);
     event ChangeProposed(uint64 indexed id, address indexed by, uint256[9] op);
@@ -125,8 +144,17 @@ contract ZkDB {
         emit TableAuditorSet(tableId, auditor);
     }
 
+    /// @param on false removes the limit; field is the row field (0..5) the limit counts.
+    function setSoloLimit(uint256 tableId, bool on, uint8 field, uint64 maxPerOp, uint64 maxPerDay) external onlyOwner {
+        if (field >= 6) revert BadOpcode();
+        soloLimit[tableId] = SoloLimit(on, field, maxPerOp, maxPerDay);
+        emit SoloLimitSet(tableId, on, field, maxPerOp, maxPerDay);
+    }
+
     function insert(uint256 tableId, uint256[6] calldata fields) external onlyWriter returns (uint64 rowId, uint64 opId) {
         if (tableOwner[tableId] != msg.sender) revert NotTableOwner();
+        SoloLimit memory lim = soloLimit[tableId];
+        if (lim.on) _countSolo(tableId, lim, fields[lim.field]);
         if (nextRowId >= MAX_ROWS) revert RowLimit();
         rowId = nextRowId++;
         rowTable[rowId] = tableId;
@@ -139,18 +167,25 @@ contract ZkDB {
     }
 
     /// Queues SET, ADD, SUB or DELETE on a row of a table the sender owns. On a table with an auditor only ADD goes
-    /// through; SET, SUB and DELETE revert with NeedsAuditor: use proposeChange.
+    /// through; SET, SUB and DELETE revert with NeedsAuditor: use proposeChange. An ADD above the table's solo limit
+    /// also reverts with NeedsAuditor.
     function enqueue(uint8 opcode, uint64 rowId, uint256 a, uint256[6] calldata v) external onlyWriter returns (uint64 opId) {
         uint256[9] memory op = _rowOp(opcode, rowId, a, v);
-        if (_needsAuditor(opcode) && tableAuditor[rowTable[rowId]] != address(0)) revert NeedsAuditor();
+        uint256 tableId = rowTable[rowId];
+        if (_needsAuditor(opcode) && tableAuditor[tableId] != address(0)) revert NeedsAuditor();
+        if (opcode == OP_ADD) {
+            SoloLimit memory lim = soloLimit[tableId];
+            if (lim.on && a == lim.field) _countSolo(tableId, lim, v[0]);
+        }
         opId = _push(op, msg.sender);
     }
 
-    /// First signature of a change that overwrites or takes away (SET, SUB or DELETE). Nothing is queued until the
-    /// table's auditor approves.
+    /// First signature of a change that overwrites or takes away (SET, SUB or DELETE), or of an ADD above the solo
+    /// limit. Nothing is queued until the table's auditor approves.
     function proposeChange(uint8 opcode, uint64 rowId, uint256 a, uint256[6] calldata v) external onlyWriter returns (uint64 id) {
-        if (!_needsAuditor(opcode)) revert BadOpcode();
         uint256[9] memory op = _rowOp(opcode, rowId, a, v);
+        // An ADD is a proposal only on a table with a solo limit; elsewhere one signer queues it with enqueue.
+        if (!_needsAuditor(opcode) && !(opcode == OP_ADD && soloLimit[rowTable[rowId]].on)) revert BadOpcode();
         _checkFields(op);
         id = uint64(proposals.length);
         proposals.push(Proposal(keccak256(abi.encode(op)), msg.sender, true));
@@ -237,6 +272,15 @@ contract ZkDB {
         op[1] = rowId;
         op[2] = a;
         for (uint256 i = 0; i < 6; i++) op[3 + i] = v[i];
+    }
+
+    /// One signer's addition to the limited field: within maxPerOp and within today's maxPerDay, or NeedsAuditor.
+    function _countSolo(uint256 tableId, SoloLimit memory lim, uint256 amount) internal {
+        if (amount == 0) return;
+        uint256 day = block.timestamp / 1 days;
+        uint256 total = soloAdded[tableId][day] + amount;
+        if (amount > lim.maxPerOp || total > lim.maxPerDay) revert NeedsAuditor();
+        soloAdded[tableId][day] = total;
     }
 
     function _openProposal(uint64 id, uint256[9] calldata op) internal view returns (Proposal storage c) {

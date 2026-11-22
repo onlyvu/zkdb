@@ -11,9 +11,9 @@ The school runs the validator and the fee token (ZKD), so students never hold or
 
 Since 21 Nov 2026 01:26 VN (unix 1795199165) a network upgrade turns on two precompiles: only wallets on the TxAllowList may send transactions and only the school may deploy contracts ([l1/README.md](../l1/README.md), demo in [l1-permissions.md](l1-permissions.md)). Runs from 3 on are after the upgrade; in run 3 the claim was sent by a claim relayer the school admin enabled that night.
 
-Limits: one validator (a team laptop, proof of authority, the PoA owner is a team key), the L1 RPC is localhost only, the validator's P-Chain balance needs topping up about once a day, no fee manager or native minter. A nullifier is per card and perk id, not per gate, so a card that claims perk #0 on both the Fuji gate and the L1 gate shows the same nullifier on both (the card stays hidden; the two claims are linkable). The runs below use perk #1 on the L1 for cards that claimed perk #0 on Fuji.
+Limits: one validator (a team server, proof of authority, the PoA owner is a team key), a public RPC that only reads (https://zkdb-rpc.vuvietanh.com) and no block explorer, the validator's P-Chain balance needs topping up about once a day, no fee manager or native minter. A nullifier is per card and perk id, not per gate, and each gate keeps its own spent set, so the same claim can be made once per chain: a card can claim perk #0 on the Fuji gate and again on the L1 gate (same nullifier on both: the card stays hidden; the two claims are linkable). The L1 gate also accepts a claim against the last root that was relayed, which can be older than the one ZkDB holds. The dashboard's claim relayer declines to send such claims itself, which prevents nothing: anyone can call the Fuji gate directly. The contract fix is designed and not deployed ([README, Limits](../README.md#limits)). The runs below use perk #1 on the L1 for cards that claimed perk #0 on Fuji.
 
-"Executed" means the receive transaction on the destination has Teleporter's `MessageExecuted` event for the message (not `MessageExecutionFailed`). Fuji transactions open on the explorer; L1 transactions are on the team validator's local RPC, and every L1 → Fuji receive on Fuji carries a Warp message signed by the L1 validator.
+"Executed" means the receive transaction on the destination has Teleporter's `MessageExecuted` event for the message (not `MessageExecutionFailed`). Fuji transactions open on the explorer; L1 transactions can be read through the L1's public RPC (the dashboard's School L1 page opens them), and every L1 → Fuji receive on Fuji carries a Warp message signed by the L1 validator.
 
 ## Runs
 
@@ -52,6 +52,6 @@ cast call 0xfab45908d9309ee508fa4e9a79437f47e1396d38 "count()(uint256)" --rpc-ur
 cast call 0x1335af7535aee69c7253f22dea3b6b214891f6e5 "lastRelayedBatch()(uint64)" --rpc-url $RPC
 # the L1 is converted, with its validator (public P-Chain API):
 curl -s -X POST -H 'content-type:application/json' --data '{"jsonrpc":"2.0","id":1,"method":"platform.getSubnet","params":{"subnetID":"23UCnnKWGoJTeAf1Uzqjo5RBvoyJ2sYQ7UMqviBcTuYqUJPL97"}}' https://api.avax-test.network/ext/bc/P
-# on the validator machine only (RPC is localhost):
-cast call 0x744e2be19b816f280e35ae441e6ba51f7b5d4c78 "batchNo()(uint64)" --rpc-url http://127.0.0.1:9650/ext/bc/272pDkC2CtfGT5kMktHTCNi7homXticaHaf1bJyfkgk5BLzTiU/rpc
+# on the L1, through its public read-only RPC:
+cast call 0x744e2be19b816f280e35ae441e6ba51f7b5d4c78 "batchNo()(uint64)" --rpc-url https://zkdb-rpc.vuvietanh.com
 ```

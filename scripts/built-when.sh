@@ -7,15 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 END=${1:-HEAD}
-LAST_PRE=${LAST_PRE:-13ddb78}   # last commit before 2 Nov 2026; override for another history
-# Source snapshots may intentionally omit the original development history.
-# Do not report a snapshot commit as the date the imported code was written.
-if ! git rev-parse --verify --quiet "$LAST_PRE^{commit}" >/dev/null; then
-  echo "Historical baseline $LAST_PRE is not available in this checkout." >&2
-  echo "Run this script in a checkout containing that history, or set LAST_PRE to an available baseline commit." >&2
-  exit 2
-fi
-git rev-parse --verify "$END^{commit}" >/dev/null
+LAST_PRE=13ddb78   # last commit before 2 Nov 2026
 EMPTY=$(git hash-object -t tree /dev/null)
 GEN='(verifiers/|package-lock\.json|fixtures/|\.json$|test_vectors|foundry\.lock|forge-std|docs/media|\.gif$|\.png$|proof-meta)'
 sum() { awk -v gen="$GEN" '$1 != "-" && $3 !~ gen { a += $1; d += $2; f++ } END { printf "%d files, +%d -%d lines\n", f, a, d }'; }

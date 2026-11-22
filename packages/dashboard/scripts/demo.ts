@@ -55,7 +55,7 @@ async function main() {
 
   // anvil keeps its dev accounts unlocked, so no private key is needed here.
   const wallet = createWalletClient({ chain: foundry, transport });
-  const [owner, treasurer, auditor, relayer] = (await wallet.getAddresses()) as [Address, Address, Address, Address];
+  const [owner, treasurer, auditor, relayer, trialWriter] = (await wallet.getAddresses()) as [Address, Address, Address, Address, Address];
 
   const deploy = async (name: string, args: unknown[]) => {
     const { abi, bytecode } = artifact(name);
@@ -84,13 +84,20 @@ async function main() {
   const { cards } = await seedPoints({ send, owner, treasurer, auditor, gate: true, meta });
   // The seed played the members and made their card secrets. They stay in a local, uncommitted file; the demo's own
   // server reads it (ZKDB_DEMO=1 below) so the Perks page can offer the cards.
+  // Try-it mode: a separate table owned by its own account, a solo limit on it, and a perk any trial card reaches.
+  const TRIAL_TABLE = 900n;
+  await send('owner', 'db', 'setWriter', [trialWriter, true]);
+  await send('owner', 'db', 'setTableOwner', [TRIAL_TABLE, trialWriter]);
+  await send('owner', 'db', 'setSoloLimit', [TRIAL_TABLE, true, 1, 200n, 100_000n]);
+  const trialPerk = Number(await pub.readContract({ address: gate, abi: artifact('PointsGate').abi, functionName: 'perkCount' }));
+  await send('owner', 'gate', 'addPerk', [TRIAL_TABLE, 100n, 'Trial: at least 100 points']);
   writeFileSync(pathOf('../.demo-cards.anvil.local'), JSON.stringify(cards, null, 1) + '\n');
 
   writeFileSync(pathOf('../.env.local'), `VITE_ZKDB_ADDRESS=${address}\nVITE_GATE_ADDRESS=${gate}\nVITE_RPC_URL=${RPC}\n`);
   console.log(`ZkDB: ${address}\nGate: ${gate}\nRPC:  ${RPC}`);
   console.log(`Test accounts in anvil order: owner ${owner}, treasurer ${treasurer}, auditor ${auditor}; ${relayer} relays claims.`);
 
-  const server = spawn('npx', ['tsx', 'server/main.ts'], { cwd: pathOf('..'), env: { ...env, ZKDB_DEMO: '1' }, stdio: 'inherit' });
+  const server = spawn('npx', ['tsx', 'server/main.ts'], { cwd: pathOf('..'), env: { ...env, ZKDB_DEMO: '1', ZKDB_TRIAL_PERK: String(trialPerk), ZKDB_TRIAL_TABLE: String(TRIAL_TABLE), ZKDB_TRIAL_ACCOUNT: trialWriter }, stdio: 'inherit' });
   server.on('exit', () => { console.error('The API server stopped, shutting the demo down.'); stop(1); });
   children.push(server);
 

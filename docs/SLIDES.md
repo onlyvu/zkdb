@@ -1,5 +1,7 @@
 # zkDB: slide outline
 
+The current deck is [zkdb-pitch.pdf](zkdb-pitch.pdf). This file is the earlier text outline, kept for its sources.
+
 Ten slides, text ready to paste. Every number is from the README or `docs/`, which link the transaction or the command behind it. Screens named here are in `docs/media/`.
 
 ## 1. Title
@@ -7,7 +9,7 @@ Ten slides, text ready to paste. Every number is from the README or `docs/`, whi
 **zkDB**
 A points ledger for student clubs where nobody can take a point away alone, and a member can prove "I have 500 points" without showing their card.
 
-Avalanche Fuji · UniHack 2026 · Vu Viet Anh
+Avalanche Fuji
 
 ## 2. The problem
 
@@ -76,11 +78,9 @@ Buyer: a university's student-affairs office or its Đoàn and Hội, paying in 
 - The receiving contract on Dispatch is not deployed. One prover server.
 - Built when: the batch circuit, its verifier, the tree and a first contract (1,308 hand-written lines) were committed on 16 Oct 2026, before the event (the organiser FAQ at team1vn.xyz: "Can I bring a project I am already building?" Yes). From 2 Nov: 8,869 lines, the claim circuit, PointsGate, ICM relay, the app and every Fuji deployment (`./scripts/built-when.sh`).
 
-## 10. Author and links
+## 10. Team and links
 
-Vu Viet Anh
 
-- Repo: github.com/onlyvu/zkdb
 - ZkDB `0x1dd3f88db29ee55e66b8db243c99c5b7fc0ea91c`
 - PointsGate `0xe68736b7dc375a90635dec5b07e09838f4fc4c33`
 - RootRelay `0x497e8189dc2d2cc07712f448f51fbe708e2e306f`

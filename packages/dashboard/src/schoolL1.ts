@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPublicClient, http, parseAbi, type Address, type Hex } from 'viem';
+import { readL1LiveConfig, type L1LiveConfig } from './l1live';
 
 /**
  * The school's own L1 as Fuji sees it. The L1 RPC is on the validator only, so this page reads the two Fuji ends of
@@ -15,6 +16,8 @@ export interface SchoolL1Config {
   relay: Address;
   registry: Address;
   fromBlock: bigint;
+  /** The L1's own public RPC and contracts. Without it the page shows the Fuji side of the link only. */
+  live?: L1LiveConfig;
 }
 
 const addressOf = (v?: string) => (v && /^0x[0-9a-fA-F]{40}$/.test(v) ? (v as Address) : undefined);
@@ -32,6 +35,7 @@ export function readSchoolL1Config(env: Record<string, string | undefined>): Sch
     relay,
     registry,
     fromBlock: BigInt(env.VITE_L1_FROM_BLOCK || 0),
+    live: readL1LiveConfig(env),
   };
 }
 
@@ -39,6 +43,9 @@ export const schoolRelayAbi = parseAbi(['event RootRelayed(uint64 indexed batchN
 export const claimRegistryAbi = parseAbi([
   'event ClaimRecorded(uint256 indexed perkId, bytes32 indexed nullifier, bytes32 indexed pickup, uint64 minPoints, bytes32 root, uint64 batchNo)',
   'event PerkRedeemed(uint256 indexed perkId, bytes32 indexed pickup)',
+  'function recorded(uint256 perkId, bytes32 nullifier) view returns (bool)',
+  'function redeem(uint256 perkId, bytes32 code)',
+  'error NothingToRedeem()',
 ]);
 
 export interface RootSent { batchNo: number; root: Hex; messageId: Hex; txHash: Hex; block: bigint }
@@ -60,6 +67,44 @@ export function summarizeSchoolL1(sent: RootSent[], recorded: ClaimRecorded[], r
     .map((r) => ({ ...r, claims: recorded.filter((c) => c.batchNo === r.batchNo).length }))
     .sort((a, b) => b.batchNo - a.batchNo);
   return { roots, claims, redeemed: claims.filter((c) => c.redeemTx).length, block };
+}
+
+/** One claim as both chains saw it: checked on the L1 (ClaimForwarded) and recorded on Fuji (ClaimRecorded). */
+export interface ClaimRow {
+  perkId: number;
+  nullifier: Hex;
+  batchNo: number;
+  minPoints?: bigint;
+  time?: number;
+  /** The L1 transaction that checked the proof, when the L1 RPC was read. */
+  l1Tx?: Hex;
+  /** The Fuji transaction in which Teleporter recorded the receipt. Missing while the receipt is on its way. */
+  fujiTx?: Hex;
+  redeemTx?: Hex;
+}
+
+/** Joins the two sides by nullifier, newest first. A side that was not read simply leaves its column empty. */
+export function joinClaims(recorded: L1Claim[], checked: { perkId: number; nullifier: Hex; batchNo: number; txHash: Hex; time?: number }[] = []): ClaimRow[] {
+  const key = (perkId: number, nullifier: string) => `${perkId}:${nullifier.toLowerCase()}`;
+  const rows = new Map<string, ClaimRow>();
+  for (const c of checked) rows.set(key(c.perkId, c.nullifier), { perkId: c.perkId, nullifier: c.nullifier, batchNo: c.batchNo, time: c.time, l1Tx: c.txHash });
+  for (const r of recorded) {
+    const k = key(r.perkId, r.nullifier);
+    const hit = rows.get(k);
+    rows.set(k, { perkId: r.perkId, nullifier: r.nullifier, batchNo: r.batchNo, ...hit, minPoints: r.minPoints, time: hit?.time ?? r.time, fujiTx: r.txHash, redeemTx: r.redeemTx });
+  }
+  return [...rows.values()].sort((a, b) => (b.time ?? Infinity) - (a.time ?? Infinity));
+}
+
+/** One proven root as both chains saw it: sent by RootRelay on Fuji, stored by RootMirror on the L1. */
+export interface RootRow { batchNo: number; root: Hex; sentTx?: Hex; storedTx?: Hex; claims: number }
+
+export function joinRoots(sent: L1Root[], stored: { batchNo: number; root: Hex; txHash: Hex }[] = [], claims: { batchNo: number }[] = []): RootRow[] {
+  const rows = new Map<number, RootRow>();
+  for (const m of stored) rows.set(m.batchNo, { batchNo: m.batchNo, root: m.root, storedTx: m.txHash, claims: 0 });
+  for (const r of sent) rows.set(r.batchNo, { ...rows.get(r.batchNo), batchNo: r.batchNo, root: r.root, sentTx: r.txHash, claims: 0 });
+  for (const row of rows.values()) row.claims = claims.filter((c) => c.batchNo === row.batchNo).length;
+  return [...rows.values()].sort((a, b) => b.batchNo - a.batchNo);
 }
 
 export async function readSchoolL1(rpcUrl: string, cfg: SchoolL1Config, logRange = 50_000n): Promise<SchoolL1State> {

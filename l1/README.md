@@ -30,14 +30,14 @@ post '{"jsonrpc":"2.0","id":1,"method":"platform.getTx","params":{"txID":"272pDk
   | python3 -c "import json,sys,base64; print(json.loads(base64.b64decode(json.load(sys.stdin)['result']['tx']['unsignedTx']['genesisData'])) == json.load(open('l1/genesis.json')))"
 ```
 
-The last line prints `True` from the repo root. The upgrade is not on the P-Chain: each validator reads it from `configs/chains/<blockchainID>/upgrade.json`, and the file must be identical on every validator or they fork. With one validator it is the copy here. On the validator machine:
+The last line prints `True` from the repo root. The upgrade is not on the P-Chain: each validator reads it from `configs/chains/<blockchainID>/upgrade.json`, and the file must be identical on every validator or they fork. With one validator it is the copy here. The lists themselves can be read from anywhere through the L1's public RPC:
 
 ```bash
-RPC=http://127.0.0.1:9650/ext/bc/272pDkC2CtfGT5kMktHTCNi7homXticaHaf1bJyfkgk5BLzTiU/rpc
+RPC=https://zkdb-rpc.vuvietanh.com   # public, read-only; on the validator itself: http://127.0.0.1:9650/ext/bc/272pDkC2CtfGT5kMktHTCNi7homXticaHaf1bJyfkgk5BLzTiU/rpc
 cast call 0x0200000000000000000000000000000000000002 "readAllowList(address)(uint256)" 0x2cC649f2d93bF4b7d8Fb031D00B155171e99a77E --rpc-url $RPC   # 0: outsider
 cast call 0x0200000000000000000000000000000000000000 "readAllowList(address)(uint256)" 0x6732CcE43f5a68Ab29ee75F1e8eF9eD939C865Ab --rpc-url $RPC   # 2: admin
 ```
 
 ## Limits
 
-One validator, on a team laptop; the L1 RPC is localhost only, so judges see the L1 through the P-Chain and through ICM messages on Fuji (each L1 → Fuji message is Warp-signed by that validator). Proof of authority, and the PoA owner is a team key (`0x7855…47F9`), which is also an allow-list admin. The validator's P-Chain balance needs topping up about once a day. The allow-lists are live since 21 Nov 2026 01:26 VN; runs before that had them off. No fee manager or native minter.
+One validator, on a team server. The L1 RPC is public and read-only at `https://zkdb-rpc.vuvietanh.com` (a proxy in front of the node: reads, plus `eth_sendRawTransaction`, which the TxAllowList refuses for outsiders); there is no block explorer, so the dashboard's School L1 page shows L1 transactions. The L1 is also visible through the P-Chain and through ICM messages on Fuji (each L1 → Fuji message is Warp-signed by that validator). Proof of authority, and the PoA owner is a team key (`0x7855…47F9`), which is also an allow-list admin. The validator's P-Chain balance needs topping up about once a day. The allow-lists are live since 21 Nov 2026 01:26 VN; runs before that had them off. No fee manager or native minter.

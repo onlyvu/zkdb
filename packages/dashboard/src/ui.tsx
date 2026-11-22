@@ -4,12 +4,14 @@ import { roleLabel } from './roles';
 import { describeOp, shortHex } from './format';
 import { actionName } from './format';
 import type { OpStatus, Slot } from './replay';
+import { EmptyArt } from './art';
 
 export const K = 16;
 
-export function Section({ id, title, count, note, actions, children }: { id?: string; title: string; count?: number; note?: string; actions?: ReactNode; children: ReactNode }) {
+/** `page` makes the title the page's headline (serif); otherwise it is a section inside a page. */
+export function Section({ id, title, count, note, actions, page, children }: { id?: string; title: string; count?: number; note?: string; actions?: ReactNode; page?: boolean; children: ReactNode }) {
   return (
-    <section id={id} className="section">
+    <section id={id} className={page ? 'section page' : 'section'}>
       <div className="section-head">
         <div>
           <h2>{title}{count !== undefined && <span className="count mono">{count}</span>}</h2>
@@ -22,9 +24,9 @@ export function Section({ id, title, count, note, actions, children }: { id?: st
   );
 }
 
-export function Table({ head, children }: { head: ([string] | [string, string])[]; children: ReactNode }) {
+export function Table({ head, children, className }: { head: ([string] | [string, string])[]; children: ReactNode; className?: string }) {
   return (
-    <div className="table-wrap" tabIndex={0}>
+    <div className={className ? `table-wrap ${className}` : 'table-wrap'} tabIndex={0}>
       <table>
         <thead><tr>{head.map(([h, cls], i) => <th key={i} scope="col" className={cls}>{h}</th>)}</tr></thead>
         <tbody>{children}</tbody>
@@ -33,7 +35,7 @@ export function Table({ head, children }: { head: ([string] | [string, string])[
   );
 }
 
-export const Empty = ({ children }: { children: ReactNode }) => <p className="empty">{children}</p>;
+export const Empty = ({ children }: { children: ReactNode }) => <div className="empty"><EmptyArt /><p>{children}</p></div>;
 
 let explorer: { url: string; name: string } | null = null;
 
@@ -62,11 +64,11 @@ export function Actor({ s, address, verb }: { s: Snapshot; address?: string; ver
   const short = shortHex(address, 4, 4);
   return (
     <span className="actor" title={address}>
-      {verb && <span className="note">{verb} </span>}
-      {role && <b>{role}</b>}{' '}
+      {verb && <span className="verb">{verb}</span>}
+      {role && <b>{role}</b>}
       {explorer
-        ? <a className="link mono" href={`${explorer.url}/address/${address}`} target="_blank" rel="noreferrer">{short}</a>
-        : <span className="mono">{short}</span>}
+        ? <a className="addr mono" href={`${explorer.url}/address/${address}`} target="_blank" rel="noreferrer">{short}</a>
+        : <span className="addr mono">{short}</span>}
     </span>
   );
 }

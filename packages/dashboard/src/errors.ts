@@ -11,6 +11,7 @@ const REVERTS: Record<string, string> = {
   ProposalMismatch: 'This is not the change that was proposed.',
   NothingNew: 'This root was already sent.',
   NothingToCollect: 'No claim is waiting for that pickup code.',
+  NothingToRedeem: 'No claim from the school L1 is waiting for that pickup code.',
   PickupTaken: 'That pickup code was used before.',
   BadOpcode: 'That operation is not allowed.',
   RowOutOfRange: 'That row has not been allocated yet.',

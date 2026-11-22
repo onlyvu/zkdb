@@ -1,4 +1,4 @@
-import { createPublicClient, http, parseAbi, type Address, type Hex } from 'viem';
+import { createPublicClient, http, parseAbi, type Address, type Hex, type PublicClient } from 'viem';
 import type { Op } from '@zkdb/core';
 import { createGlacier } from './glacier';
 import { replay, type BatchEvent, type QueuedOp, type ReplayResult } from './replay';
@@ -66,6 +66,31 @@ export const gateAbi = parseAbi([
   'event PerkClaimed(uint256 indexed perkId, bytes32 indexed nullifier, bytes32 indexed pickup, bytes32 root)',
   'event PerkCollected(uint256 indexed perkId, bytes32 indexed pickup)',
 ]);
+
+/** AdminGovernor: the contract that owns ZkDB once the single owner key is retired. */
+export const governorAbi = parseAbi([
+  'function threshold() view returns (uint64)',
+  'function delay() view returns (uint64)',
+  'function signers() view returns (address[])',
+]);
+
+/** How the owner decides, when the owner is an AdminGovernor: `threshold` of `signers`, then `delay` seconds in public. */
+export interface Governor { threshold: number; delay: number; signers: readonly Address[] }
+
+/** Reads the governor's rules from `owner`. A wallet, or any contract that is not an AdminGovernor, gives undefined. */
+export async function readGovernor(client: Pick<PublicClient, 'readContract'>, owner: Address): Promise<Governor | undefined> {
+  const call = { address: owner, abi: governorAbi } as const;
+  try {
+    const [threshold, delay, signers] = await Promise.all([
+      client.readContract({ ...call, functionName: 'threshold' }),
+      client.readContract({ ...call, functionName: 'delay' }),
+      client.readContract({ ...call, functionName: 'signers' }),
+    ]);
+    return { threshold: Number(threshold), delay: Number(delay), signers };
+  } catch {
+    return undefined;
+  }
+}
 
 export const relayAbi = parseAbi([
   'function relay() returns (bytes32 messageID)',
@@ -147,6 +172,8 @@ export interface Snapshot extends ReplayResult {
   address: Address;
   root: bigint;
   owner: Address;
+  /** Set when the owner is an AdminGovernor rather than one key. */
+  governor?: Governor;
   verifier: Address;
   batchCount: number;
   head: number;
@@ -259,6 +286,13 @@ export function createReader(cfg: ChainConfig) {
     return scanned < block ? join(base, await fetchRange(scanned + 1n, block)) : base;
   };
 
+  // The governor's rules change only through the governor itself, so they are read once per owner, not on every poll.
+  const governors = new Map<Address, Promise<Governor | undefined>>();
+  const governorOf = (owner: Address) => {
+    if (!governors.has(owner)) governors.set(owner, readGovernor(client, owner));
+    return governors.get(owner)!;
+  };
+
   return {
     blockNumber: () => client.getBlockNumber(),
 
@@ -347,6 +381,7 @@ export function createReader(cfg: ChainConfig) {
         address: cfg.address,
         root: BigInt(root),
         owner,
+        governor: await governorOf(owner),
         verifier,
         batchCount: Number(batchCount),
         head: Number(head),

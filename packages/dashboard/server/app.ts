@@ -1,9 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, RequestListener, ServerResponse } from 'node:http';
-import { BaseError, ContractFunctionRevertedError, createPublicClient, getAddress, hexToString, http, isAddress, parseEventLogs, toFunctionSelector, type Address, type Hex } from 'viem';
+import { BaseError, ContractFunctionRevertedError, createPublicClient, encodeFunctionData, getAddress, hexToString, http, isAddress, parseAbi, parseEventLogs, toFunctionSelector, type Address, type Hex } from 'viem';
 import { generateSiweNonce, parseSiweMessage } from 'viem/siwe';
-import { buildBatch, initHash, K, ZkDbState, type BatchInput } from '@zkdb/core';
-import { createReader, gateAbi, zkdbAbi, type ChainConfig } from '../src/chain';
+import { buildBatch, initHash, K, OPCODE, P, ZkDbState, type BatchInput } from '@zkdb/core';
+import { createReader, gateAbi, relayAbi, zkdbAbi, type ChainConfig } from '../src/chain';
 import { memoryStore, type MetaStore } from './meta';
 
 const SESSION_MS = 8 * 60 * 60 * 1000;
@@ -40,21 +40,86 @@ export interface DemoOptions {
   hosts: string[];
 }
 
+/**
+ * The school L1 end of a claim: ClaimForwarder runs PointsGate there and sends the receipt to Fuji over ICM. The
+ * relayer must be on the L1's TxAllowList; it pays the claim in the L1's own token.
+ */
+export interface L1RelayOptions {
+  rpcUrl: string;
+  forwarder: Address;
+  relayer: SendTx;
+  relayerAddress: Address;
+}
+
+/** ClaimForwarder, with the errors PointsGate raises through it. */
+export const forwarderAbi = parseAbi([
+  'function claimAndForward(bytes proof, uint256 perkId, bytes32 nullifier, bytes32 pickup) returns (bytes32 messageID)',
+  'function gate() view returns (address)',
+  'function mirror() view returns (address)',
+  'error UnknownPerk()',
+  'error AlreadyClaimed()',
+  'error PickupTaken()',
+  'error InvalidProof()',
+  'event ClaimForwarded(uint256 indexed perkId, bytes32 indexed nullifier, bytes32 pickup, bytes32 root, uint64 batchNo, bytes32 indexed messageID)',
+]);
+
+/** What the server reads on the L1 before it relays there: the mirrored root and the gate's spent nullifiers. */
+const l1ReadAbi = parseAbi([
+  'function root() view returns (bytes32)',
+  'function batchNo() view returns (uint64)',
+  'function claimed(uint256 perkId, bytes32 nullifier) view returns (bool)',
+]);
+const registryReadAbi = parseAbi(['function recorded(uint256 perkId, bytes32 nullifier) view returns (bool)']);
+
 const DEMO_COOKIE = 'zkdb_demo';
 const selectors = (...signatures: string[]) => signatures.map((sig) => toFunctionSelector(`function ${sig}`));
 const SUBMIT = 'submitBatch(bytes,bytes32,bool[16],uint256[9][])';
 const PROPOSE = 'proposeChange(uint8,uint64,uint256,uint256[6])';
 const DECLINE = 'declineChange(uint64,uint256[9])';
 /** What each demo role may call: `db` is ZkDB, `relay` is RootRelay, `gate` is PointsGate (handing a perk out). */
-const DEMO_CALLS: Record<DemoRole, { db: Hex[]; relay: Hex[]; gate: Hex[] }> = {
-  owner: { db: selectors('setWriter(address,bool)', 'setTableOwner(uint256,address)', 'setTableAuditor(uint256,address)', SUBMIT), relay: selectors('relay()'), gate: [] },
+const DEMO_CALLS: Record<DemoRole, { db: Hex[]; relay: Hex[]; gate: Hex[]; registry: Hex[] }> = {
+  owner: { db: selectors('setWriter(address,bool)', 'setTableOwner(uint256,address)', 'setTableAuditor(uint256,address)', SUBMIT), relay: selectors('relay()'), gate: [], registry: [] },
   treasurer: {
     db: selectors('insert(uint256,uint256[6])', 'enqueue(uint8,uint64,uint256,uint256[6])', PROPOSE, DECLINE, SUBMIT),
     relay: selectors('relay()'),
     gate: selectors('collect(uint256,bytes32)'),
+    // Handing out a perk that was claimed on the school L1: ClaimRegistry on this chain holds its receipt.
+    registry: selectors('redeem(uint256,bytes32)'),
   },
-  auditor: { db: selectors('approveChange(uint64,uint256[9])', DECLINE, SUBMIT), relay: selectors('relay()'), gate: [] },
+  auditor: { db: selectors('approveChange(uint64,uint256[9])', DECLINE, SUBMIT), relay: selectors('relay()'), gate: [], registry: [] },
 };
+
+/**
+ * Try-it mode for visitors with no wallet and no AVAX. A separate table, owned by a separate trial key, so a visitor
+ * never touches the club's table. The visitor's browser makes the card secret and sends only its hash; the server
+ * inserts the card, awards it points, proves the batch and sends it, all paid by the trial key. The claim is then
+ * proved in the browser and sent by the claim relayer as usual. Every step is capped per hour and per visitor.
+ */
+export interface TrialOptions {
+  /** Table the trial key owns. It must not be the club's table. */
+  table: bigint;
+  /** Perk on PointsGate for this table; its threshold must be at most `points`. */
+  perkId: number;
+  /** Points a new trial card is awarded. */
+  points: bigint;
+  /** The trial key: a writer that owns `table`, and pays for inserts, awards and batch proofs. */
+  writer: { address: Address; send: SendTx };
+  /** Trial cards per hour for everyone together. Default 20. */
+  cardsPerHour?: number;
+  /** Trial cards per visitor (IP) per day. Default 3. */
+  cardsPerVisitor?: number;
+  /** Trial batch proofs per hour. Default 20. */
+  batchesPerHour?: number;
+  /** Take the visitor's IP from the proxy in front (only behind a proxy you run): the last X-Forwarded-For entry. */
+  trustProxy?: boolean;
+  /** With trustProxy: a header only that proxy sets with the client's address, e.g. cf-connecting-ip behind Cloudflare. */
+  clientIpHeader?: string;
+}
+
+/** Fields of a trial row, as on the club's table: [card number, balance, card key, 0, 0, 0]. */
+export const TRIAL_BALANCE_FIELD = 1;
+/** Reason code put on the trial award (op[4]), like the club's reason codes. */
+export const TRIAL_REASON = 30n;
 
 export interface Proof { proof: Uint8Array; }
 export type Prover = (batch: BatchInput) => Promise<Proof>;
@@ -70,12 +135,16 @@ export interface AppOptions {
   meta?: MetaStore;
   /** Pays the gas of members' perk claims, so a member needs no wallet. Without it, claims cannot be relayed. */
   relayer?: SendTx;
+  /** Relays claims to the school L1 as well. Without it, claims go to the gate on this chain only. */
+  l1?: L1RelayOptions;
   /** Present only when the server was started with ZKDB_DEMO=1. Without it the demo routes do not exist. */
   demo?: DemoOptions;
   /** Most claims the relayer sends per hour, so a script cannot spend its gas. Default 60. */
   relayPerHour?: number;
   /** The points table: its auditor may run the prover too. Default 1. */
   programTable?: bigint;
+  /** Try-it mode. Without it the /api/trial routes answer 404. */
+  trial?: TrialOptions;
 }
 
 class HttpError extends Error {
@@ -211,8 +280,7 @@ export function createApp(opts: AppOptions): RequestListener {
    * and the nullifier, never the card. The call is simulated first, so a claim the gate would refuse costs no gas.
    */
   const relayed: number[] = [];
-  async function relayClaim(body: unknown) {
-    if (!opts.relayer || !opts.chain.gate) throw new HttpError(503, 'no_relayer', 'This server does not relay claims.');
+  function claimArgs(body: unknown) {
     const { proof, perkId, nullifier, pickup } = (body ?? {}) as { proof?: unknown; perkId?: unknown; nullifier?: unknown; pickup?: unknown };
     if (!hex(proof) || proof.length > 2 + 2 * 16_384 || !hex(nullifier, 32) || !hex(pickup, 32) || typeof perkId !== 'number' || !Number.isInteger(perkId) || perkId < 0) {
       throw new HttpError(400, 'bad_request', 'proof, perkId, nullifier and pickup are required.');
@@ -221,24 +289,262 @@ export function createApp(opts: AppOptions): RequestListener {
     const hourAgo = Date.now() - 3_600_000;
     while (relayed.length && relayed[0] < hourAgo) relayed.shift();
     if (relayed.length >= (opts.relayPerHour ?? 60)) throw new HttpError(429, 'rate_limited', 'Too many claims this hour. Try again later.');
-    const call = { address: opts.chain.gate, abi: gateAbi, functionName: 'claim', args: [proof, BigInt(perkId), nullifier, pickup] } as const;
+    return [proof, BigInt(perkId), nullifier, pickup] as const;
+  }
+
+  /** Turns a refused simulation into the reason the member can act on. `stale` says what to do about a proof made against an older root. */
+  function refuse(e: unknown, stale: string): never {
+    const revert = e instanceof BaseError ? e.walk((x) => x instanceof ContractFunctionRevertedError) : null;
+    const name = revert instanceof ContractFunctionRevertedError ? revert.data?.errorName : undefined;
+    if (name === 'AlreadyClaimed') throw new HttpError(409, 'already_claimed', 'This card has already claimed this perk.');
+    if (name === 'PickupTaken') throw new HttpError(409, 'pickup_taken', 'That pickup code was used before. Try again.');
+    if (name === 'UnknownPerk') throw new HttpError(404, 'unknown_perk', 'That perk does not exist.');
+    throw new HttpError(409, 'invalid_proof', stale);
+  }
+
+  const l1Client = opts.l1 ? createPublicClient({ transport: http(opts.l1.rpcUrl) }) : undefined;
+  /** The L1 gate and mirror are the ones the forwarder itself names, so they cannot drift from it. Read once. */
+  let l1Contracts: Promise<{ gate: Address; mirror: Address }> | undefined;
+  const l1Addresses = () => {
+    l1Contracts ??= Promise.all([
+      l1Client!.readContract({ address: opts.l1!.forwarder, abi: forwarderAbi, functionName: 'gate' }),
+      l1Client!.readContract({ address: opts.l1!.forwarder, abi: forwarderAbi, functionName: 'mirror' }),
+    ]).then(([gate, mirror]) => ({ gate, mirror }));
+    l1Contracts.catch(() => { l1Contracts = undefined; });
+    return l1Contracts;
+  };
+
+  /**
+   * A nullifier is per card and perk, and the two gates keep separate lists of spent ones, so the contracts accept
+   * the same card and perk once on Fuji and once on the school L1. This relayer declines to send the second one:
+   * before relaying to either gate it asks every place a claim can be recorded (the Fuji gate, the L1 gate, and
+   * ClaimRegistry, which holds the receipts from the L1), and relays nothing if one of them cannot be read.
+   *
+   * This is not enforcement. Anyone can call PointsGate on Fuji directly, and any wallet on the L1 TxAllowList can
+   * call ClaimForwarder; neither goes through here. It only keeps this dashboard from making the second claim
+   * itself, and lets the page say why. The fix belongs in the contracts and is not deployed (README, Limits).
+   */
+  async function spentOn(perkId: bigint, nullifier: Hex): Promise<'fuji' | 'l1' | null> {
     try {
-      await client.simulateContract(call);
-    } catch (e) {
-      const revert = e instanceof BaseError ? e.walk((x) => x instanceof ContractFunctionRevertedError) : null;
-      const name = revert instanceof ContractFunctionRevertedError ? revert.data?.errorName : undefined;
-      if (name === 'AlreadyClaimed') throw new HttpError(409, 'already_claimed', 'This card has already claimed this perk.');
-      if (name === 'PickupTaken') throw new HttpError(409, 'pickup_taken', 'That pickup code was used before. Try again.');
-      if (name === 'UnknownPerk') throw new HttpError(404, 'unknown_perk', 'That perk does not exist.');
-      throw new HttpError(409, 'invalid_proof', 'The gate rejected the proof. If a new proof of changes just landed, try again.');
+      const [onGate, onRegistry, onL1] = await Promise.all([
+        opts.chain.gate ? client.readContract({ address: opts.chain.gate, abi: gateAbi, functionName: 'claimed', args: [perkId, nullifier] }) : false,
+        opts.chain.l1 ? client.readContract({ address: opts.chain.l1.registry, abi: registryReadAbi, functionName: 'recorded', args: [perkId, nullifier] }) : false,
+        l1Client ? l1Addresses().then(({ gate }) => l1Client.readContract({ address: gate, abi: l1ReadAbi, functionName: 'claimed', args: [perkId, nullifier] })) : false,
+      ]);
+      return onGate ? 'fuji' : onRegistry || onL1 ? 'l1' : null;
+    } catch {
+      throw new HttpError(503, 'check_failed', 'Could not check whether this card already claimed this perk on the other chain. Try again shortly.');
     }
-    relayed.push(Date.now());
-    const { encodeFunctionData } = await import('viem');
-    const gas = (await client.estimateContractGas(call)) * 12n / 10n;
-    const txHash = await opts.relayer({ to: opts.chain.gate, data: encodeFunctionData(call), gas });
-    const receipt = await client.waitForTransactionReceipt({ hash: txHash, pollingInterval: 500 });
-    if (receipt.status !== 'success') throw new HttpError(409, 'reverted', 'The claim transaction reverted.');
-    return { txHash, gasUsed: receipt.gasUsed.toString() };
+  }
+
+  /** One relay per card and perk at a time through this server, so two of its own requests cannot both pass the checks above. */
+  const inFlight = new Set<string>();
+  async function oneAtATime<T>(perkId: bigint, nullifier: Hex, work: () => Promise<T>): Promise<T> {
+    const key = `${perkId}:${nullifier.toLowerCase()}`;
+    if (inFlight.has(key)) throw new HttpError(409, 'claim_in_flight', 'This claim is already being relayed.');
+    inFlight.add(key);
+    try {
+      return await work();
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
+  async function relayClaim(body: unknown) {
+    if (!opts.relayer || !opts.chain.gate) throw new HttpError(503, 'no_relayer', 'This server does not relay claims.');
+    const gate = opts.chain.gate;
+    const relayer = opts.relayer;
+    const args = claimArgs(body);
+    return oneAtATime(args[1], args[2], async () => {
+      const spent = await spentOn(args[1], args[2]);
+      if (spent === 'fuji') throw new HttpError(409, 'already_claimed', 'This card has already claimed this perk.');
+      if (spent === 'l1') throw new HttpError(409, 'claimed_elsewhere', 'This card has already claimed this perk on the school L1.');
+      const call = { address: gate, abi: gateAbi, functionName: 'claim', args } as const;
+      try {
+        await client.simulateContract(call);
+      } catch (e) {
+        refuse(e, 'The gate rejected the proof. If a new proof of changes just landed, try again.');
+      }
+      relayed.push(Date.now());
+      const gas = (await client.estimateContractGas(call)) * 12n / 10n;
+      const txHash = await relayer({ to: gate, data: encodeFunctionData(call), gas });
+      const receipt = await client.waitForTransactionReceipt({ hash: txHash, pollingInterval: 500 });
+      if (receipt.status !== 'success') throw new HttpError(409, 'reverted', 'The claim transaction reverted.');
+      return { txHash, gasUsed: receipt.gasUsed.toString() };
+    });
+  }
+
+  /**
+   * The L1 gate checks a proof against whatever root RootMirror holds. While the newest root has not arrived
+   * there, a proof made against the older one still passes, for points a later change may have taken away.
+   * This relayer sends a claim to the L1 only while the mirror holds the batch number and root ZkDB holds on this
+   * chain. Like the check above, that covers this server only: the L1 contracts do not know Fuji's latest batch.
+   */
+  async function assertL1RootCurrent() {
+    let mirror: { batchNo: bigint; root: Hex };
+    let ledger: { batchNo: bigint; root: Hex };
+    try {
+      const { mirror: address } = await l1Addresses();
+      const [mirrorBatch, mirrorRoot, batchCount, root] = await Promise.all([
+        l1Client!.readContract({ address, abi: l1ReadAbi, functionName: 'batchNo' }),
+        l1Client!.readContract({ address, abi: l1ReadAbi, functionName: 'root' }),
+        client.readContract({ ...contract, functionName: 'batchCount' }),
+        client.readContract({ ...contract, functionName: 'root' }),
+      ]);
+      mirror = { batchNo: mirrorBatch, root: mirrorRoot };
+      ledger = { batchNo: batchCount, root };
+    } catch {
+      throw new HttpError(503, 'check_failed', 'Could not read the root the school L1 holds. Try again shortly.');
+    }
+    if (mirror.batchNo !== ledger.batchNo || BigInt(mirror.root) !== BigInt(ledger.root)) {
+      throw new HttpError(409, 'l1_root_behind', `The school L1 has not received the newest root yet: it holds #${mirror.batchNo}, the ledger is at #${ledger.batchNo}. Try again once the root is sent.`);
+    }
+  }
+
+  /**
+   * The same claim, sent to the school L1: ClaimForwarder has PointsGate there check the proof against the root
+   * RootMirror holds, then sends the receipt to this chain over ICM. Same cap per hour as the claim above, same
+   * checks first, and simulated before anything is sent.
+   */
+  async function relayClaimL1(body: unknown) {
+    if (!opts.l1 || !l1Client) throw new HttpError(503, 'no_l1_relayer', 'This server does not relay claims to the school L1.');
+    const l1 = opts.l1;
+    const args = claimArgs(body);
+    return oneAtATime(args[1], args[2], async () => {
+      await assertL1RootCurrent();
+      const spent = await spentOn(args[1], args[2]);
+      if (spent === 'l1') throw new HttpError(409, 'already_claimed', 'This card has already claimed this perk on the school L1.');
+      if (spent === 'fuji') throw new HttpError(409, 'claimed_elsewhere', 'This card has already claimed this perk on Fuji.');
+      const call = { address: l1.forwarder, abi: forwarderAbi, functionName: 'claimAndForward', args, account: l1.relayerAddress } as const;
+      try {
+        await l1Client.simulateContract(call);
+      } catch (e) {
+        refuse(e, 'The gate on the school L1 rejected the proof.');
+      }
+      relayed.push(Date.now());
+      const gas = (await l1Client.estimateContractGas(call)) * 12n / 10n;
+      const { account: _from, ...data } = call;
+      const txHash = await l1.relayer({ to: l1.forwarder, data: encodeFunctionData(data), gas });
+      const receipt = await l1Client.waitForTransactionReceipt({ hash: txHash, pollingInterval: 500 });
+      if (receipt.status !== 'success') throw new HttpError(409, 'reverted', 'The claim transaction reverted on the school L1.');
+      const forwarded = parseEventLogs({ abi: forwarderAbi, eventName: 'ClaimForwarded', logs: receipt.logs })[0];
+      return { txHash, gasUsed: receipt.gasUsed.toString(), messageId: forwarded?.args.messageID };
+    });
+  }
+
+  /** A sliding one-hour (or one-day) window of timestamps. */
+  const windowed = (list: number[], ms: number) => {
+    const since = Date.now() - ms;
+    while (list.length && list[0] < since) list.shift();
+    return list;
+  };
+  const trialCards: number[] = [];
+  const trialBatches: number[] = [];
+  const trialByVisitor = new Map<string, number[]>();
+  let trialBusy = false;
+
+  /**
+   * Who the per-visitor cap counts. Behind a proxy we run: the header only that proxy sets (clientIpHeader), else
+   * the last X-Forwarded-For entry, which is the one the nearest proxy appended. Entries to its left are whatever
+   * the client chose to send, so they are never used.
+   */
+  function visitorOf(req: IncomingMessage): string {
+    const t = opts.trial;
+    if (t?.trustProxy) {
+      const named = t.clientIpHeader ? req.headers[t.clientIpHeader.toLowerCase()] : undefined;
+      if (typeof named === 'string' && named.trim()) return named.trim();
+      const fwd = req.headers['x-forwarded-for'];
+      const last = (Array.isArray(fwd) ? fwd.join(',') : fwd)?.split(',').pop()?.trim();
+      if (last) return last;
+    }
+    return req.socket.remoteAddress || 'unknown';
+  }
+
+  async function sendAndWait(by: SendTx, call: Parameters<typeof encodeFunctionData>[0] & { address: Address }) {
+    const gas = (await client.estimateContractGas({ ...(call as object), account: opts.trial!.writer.address } as never)) * 12n / 10n;
+    const hash = await by({ to: call.address, data: encodeFunctionData(call), gas });
+    const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 500 });
+    if (receipt.status !== 'success') throw new HttpError(502, 'reverted', 'A trial transaction reverted.');
+    return receipt;
+  }
+
+  function trialInfo() {
+    const t = opts.trial;
+    if (!t) return { enabled: false };
+    return {
+      enabled: true,
+      table: t.table.toString(),
+      perkId: t.perkId,
+      points: t.points.toString(),
+      writer: t.writer.address,
+      cardsLeftThisHour: Math.max(0, (t.cardsPerHour ?? 20) - windowed(trialCards, 3_600_000).length),
+      relayer: !!opts.relayer,
+    };
+  }
+
+  /** Step 1: insert a card for the visitor's card key and award it the trial points. Two ops in the queue. */
+  async function trialCard(req: IncomingMessage, body: unknown) {
+    const t = opts.trial;
+    if (!t) throw new HttpError(404, 'not_found', 'Try-it mode is off on this server.');
+    const { cardKey } = (body ?? {}) as { cardKey?: unknown };
+    if (!hex(cardKey, 32) || BigInt(cardKey) === 0n || BigInt(cardKey) >= P) throw new HttpError(400, 'bad_request', 'cardKey must be a field element (32-byte hex).');
+    const visitor = visitorOf(req);
+    const mine = windowed(trialByVisitor.get(visitor) ?? [], 86_400_000);
+    if (mine.length >= (t.cardsPerVisitor ?? 3)) throw new HttpError(429, 'rate_limited', 'This visitor made enough trial cards today. Try again tomorrow.');
+    if (windowed(trialCards, 3_600_000).length >= (t.cardsPerHour ?? 20)) throw new HttpError(429, 'rate_limited', 'Trial cards are used up for this hour. Try again later.');
+    mine.push(Date.now());
+    trialByVisitor.set(visitor, mine);
+    trialCards.push(Date.now());
+
+    const nextRow = await client.readContract({ ...contract, functionName: 'nextRowId' });
+    const fields = [nextRow, 0n, BigInt(cardKey), 0n, 0n, 0n] as const;
+    const ins = await sendAndWait(t.writer.send, { ...contract, functionName: 'insert', args: [t.table, fields] });
+    const queued = parseEventLogs({ abi: zkdbAbi, eventName: 'OpQueued', logs: ins.logs })[0];
+    if (!queued) throw new HttpError(502, 'no_event', 'The insert did not queue an op.');
+    const rowId = queued.args.op[1];
+    const v = [t.points, TRIAL_REASON, 0n, 0n, 0n, 0n] as const;
+    const add = await sendAndWait(t.writer.send, { ...contract, functionName: 'enqueue', args: [Number(OPCODE.ADD), rowId, BigInt(TRIAL_BALANCE_FIELD), v] });
+    return {
+      rowId: rowId.toString(),
+      card: rowId.toString(),
+      points: t.points.toString(),
+      txs: [
+        { step: 'insert', hash: ins.transactionHash, gasUsed: ins.gasUsed.toString() },
+        { step: 'award', hash: add.transactionHash, gasUsed: add.gasUsed.toString() },
+      ],
+    };
+  }
+
+  /** Step 2: prove the next batch of queued ops and submit it, paid by the trial key. */
+  async function trialBatch() {
+    const t = opts.trial;
+    if (!t) throw new HttpError(404, 'not_found', 'Try-it mode is off on this server.');
+    if (windowed(trialBatches, 3_600_000).length >= (t.batchesPerHour ?? 20)) throw new HttpError(429, 'rate_limited', 'Trial proofs are used up for this hour. Try again later.');
+    const pending = await client.readContract({ ...contract, functionName: 'pendingOps' });
+    if (pending === 0n) return { alreadyProven: true };
+    trialBatches.push(Date.now());
+    const proven = await proveNext();
+    const sentAt = performance.now();
+    const receipt = await sendAndWait(t.writer.send, {
+      ...contract,
+      functionName: 'submitBatch',
+      args: [proven.proof as Hex, proven.newRoot, proven.ok as unknown as readonly [boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean, boolean], proven.ops.map((op) => op.map(BigInt)) as never],
+    });
+    meta.update(proven.newRoot, { txHash: receipt.transactionHash.toLowerCase(), confirmMs: Math.round(performance.now() - sentAt) });
+    // The new root goes on to the other chains, as it does after a proof on the Manage page. Without this the school
+    // L1 would keep checking claims against the root before the visitor's batch. The batch stands either way: anyone
+    // can call relay() later, and the next root supersedes this one.
+    const relayed: { to: string; txHash: Hex; gasUsed: string }[] = [];
+    for (const r of [opts.chain.l1, opts.chain.icm]) {
+      if (!r) continue;
+      try {
+        const sent = await sendAndWait(t.writer.send, { address: r.relay, abi: relayAbi, functionName: 'relay' });
+        relayed.push({ to: r.name, txHash: sent.transactionHash, gasUsed: sent.gasUsed.toString() });
+      } catch {
+        // Left for the next relay() call.
+      }
+    }
+    return { txHash: receipt.transactionHash, gasUsed: receipt.gasUsed.toString(), newRoot: proven.newRoot, provingMs: proven.provingMs, consumed: proven.consumed, relayed };
   }
 
   const readCookie = (req: IncomingMessage, name: string) =>
@@ -297,9 +603,10 @@ export function createApp(opts: AppOptions): RequestListener {
       const tx = (p[0] ?? {}) as { to?: unknown; data?: unknown; gas?: unknown; value?: unknown };
       const to = typeof tx.to === 'string' ? tx.to.toLowerCase() : '';
       const allowed = to === opts.chain.address.toLowerCase() ? DEMO_CALLS[account.role].db
-        : to !== '' && to === opts.chain.icm?.relay.toLowerCase() ? DEMO_CALLS[account.role].relay
+        : to !== '' && (to === opts.chain.icm?.relay.toLowerCase() || to === opts.chain.l1?.relay.toLowerCase()) ? DEMO_CALLS[account.role].relay
           : to !== '' && to === opts.chain.gate?.toLowerCase() ? DEMO_CALLS[account.role].gate
-            : [];
+            : to !== '' && to === opts.chain.l1?.registry.toLowerCase() ? DEMO_CALLS[account.role].registry
+              : [];
       const noValue = tx.value === undefined || (hex(tx.value) && BigInt(tx.value === '0x' ? 0 : tx.value) === 0n);
       if (!hex(tx.data) || tx.data.length < 10 || !allowed.includes(tx.data.slice(0, 10).toLowerCase() as Hex) || !noValue) {
         throw new HttpError(403, 'forbidden', `The demo ${account.label.toLowerCase()} account cannot make this call.`);
@@ -366,6 +673,34 @@ export function createApp(opts: AppOptions): RequestListener {
           return send(res, 200, await relayClaim(await readJson(req)));
         } finally {
           relaying = false;
+        }
+      }
+      case 'GET /api/claims/targets':
+        // Where this server can send a claim, so the page only offers what will work.
+        return send(res, 200, { fuji: !!(opts.relayer && opts.chain.gate), l1: !!opts.l1 });
+      case 'POST /api/claims/relay-l1': {
+        if (relaying) throw new HttpError(409, 'busy', 'Another claim is being relayed. Try again shortly.');
+        relaying = true;
+        try {
+          return send(res, 200, await relayClaimL1(await readJson(req)));
+        } finally {
+          relaying = false;
+        }
+      }
+      case 'GET /api/trial':
+        return send(res, 200, trialInfo());
+      case 'POST /api/trial/card':
+      case 'POST /api/trial/batch': {
+        if (!opts.trial) throw new HttpError(404, 'not_found', 'Try-it mode is off on this server.');
+        // One trial transaction sequence at a time: the trial key's nonces stay in order, and proving is serialized.
+        if (trialBusy || proving) throw new HttpError(409, 'busy', 'Another visitor is using the trial right now. Try again in a minute.');
+        trialBusy = true;
+        if (key === 'POST /api/trial/batch') proving = true;
+        try {
+          return send(res, 200, key === 'POST /api/trial/card' ? await trialCard(req, await readJson(req)) : await trialBatch());
+        } finally {
+          trialBusy = false;
+          if (key === 'POST /api/trial/batch') proving = false;
         }
       }
       case 'GET /api/demo/accounts':

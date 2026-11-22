@@ -43,6 +43,18 @@ export const reasonLabel = (code: bigint) => REASON_BY_CODE.get(code);
 
 export const formatCard = (card: bigint) => `#${card.toString().padStart(4, '0')}`;
 
+/** The try-it table (the server's default, 900): visitors' cards, kept apart from the club's members. */
+export const TRIAL_TABLE = BigInt(import.meta.env?.VITE_TRIAL_TABLE ?? 900);
+
+/** A change on a trial card in words, for the activity list. Null for every other change. */
+export function trialChange(op: Op, ops: OpView[]): string | null {
+  const [code, rowId, a, v0] = op;
+  if (code === OPCODE.INSERT) return a === TRIAL_TABLE ? 'Trial card added' : null;
+  const insert = ops.find((o) => o.op[0] === OPCODE.INSERT && o.op[1] === rowId);
+  if (insert?.op[2] !== TRIAL_TABLE) return null;
+  return code === OPCODE.ADD && a === BigInt(BALANCE_FIELD) ? `+${formatAmount(v0)} Trial` : null;
+}
+
 export type PointsKind = 'join' | 'award' | 'redeem' | 'correct' | 'leave';
 
 export interface PointsEvent {

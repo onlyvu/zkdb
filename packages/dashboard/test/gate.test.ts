@@ -3,10 +3,9 @@ import { readFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
-import { delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createPublicClient, createWalletClient, encodeFunctionData, http, stringToHex, type Abi, type Address, type Hex } from 'viem';
+import { createPublicClient, createWalletClient, encodeAbiParameters, encodeFunctionData, http, parseAbiParameters, stringToHex, type Abi, type Address, type Hex } from 'viem';
 import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 import { foundry } from 'viem/chains';
@@ -22,7 +21,7 @@ const PORT = 8548;
 const RPC = `http://127.0.0.1:${PORT}`;
 const DOMAIN = 'localhost:5173';
 const CONTRACTS = fileURLToPath(new URL('../../../contracts', import.meta.url));
-const env = { ...process.env, PATH: `${homedir()}/.foundry/bin${delimiter}${process.env.PATH ?? process.env.Path ?? ''}` };
+const env = { ...process.env, PATH: `${homedir()}/.foundry/bin:${process.env.PATH}` };
 const fixture = JSON.parse(readFileSync(`${CONTRACTS}/test/fixtures/claim_1.json`, 'utf8'));
 const flat: bigint[] = fixture.opsFlat.map(BigInt);
 const ops = Array.from({ length: flat.length / 9 }, (_, i) => flat.slice(i * 9, i * 9 + 9));
@@ -209,6 +208,180 @@ describe.skipIf(!hasTools)('perk gate, relayer, demo accounts and corrections on
     const res = await fetch(`${url}/api/claims/relay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(res.status).toBe(503);
     bare.close();
+  });
+
+  // --- claims on the school L1: the same proof goes through ClaimForwarder, which sends the receipt on over ICM ---
+
+  describe('claims relayed to the school L1', () => {
+    const SOURCE = `0x${'11'.repeat(32)}` as Hex;
+    const DESTINATION = `0x${'22'.repeat(32)}` as Hex;
+    const rootMessage = (batchNo: bigint, root: Hex) => encodeAbiParameters(parseAbiParameters('uint64, bytes32'), [batchNo, root]);
+    let mirror: Address, l1Gate: Address, teleporter: Address, forwarder: Address, registry: Address, gate2: Address;
+    let l1Server: Server;
+    let l1Base: string;
+    let l1Chain: Parameters<typeof createApp>[0]['chain'];
+    const noProver = async () => { throw new Error('unused'); };
+    const relayer: SendTx = (tx) => wallet.sendTransaction({ ...tx, account: relayerAccount });
+    const teleporterArtifact = () => {
+      const a = JSON.parse(readFileSync(`${CONTRACTS}/out/RootRelay.t.sol/MockTeleporter.json`, 'utf8'));
+      return { abi: a.abi as Abi, bytecode: a.bytecode.object as Hex };
+    };
+    const claimBody = (i: number, over: Record<string, unknown> = {}) =>
+      JSON.stringify({ proof: fixture.claims[i].proof, perkId: 0, nullifier: fixture.claims[i].nullifier, pickup: fixture.claims[i].pickup, ...over });
+    const headers = { 'Content-Type': 'application/json', Origin: `http://${DOMAIN}` };
+    const claimL1 = (i: number, over: Record<string, unknown> = {}, at = l1Base) => fetch(`${at}/api/claims/relay-l1`, { method: 'POST', headers, body: claimBody(i, over) });
+    /** The claim sent to the gate on this chain, through the server that also knows the L1. */
+    const claimHere = (i: number, over: Record<string, unknown> = {}) => fetch(`${l1Base}/api/claims/relay`, { method: 'POST', headers, body: claimBody(i, over) });
+    const claimedOn = (address: Address, i: number) =>
+      pub.readContract({ address, abi: artifact('PointsGate').abi, functionName: 'claimed', args: [0n, fixture.claims[i].nullifier] });
+    const sentOverIcm = () => pub.readContract({ address: teleporter, abi: teleporterArtifact().abi, functionName: 'sent' });
+    const relayerNonce = () => pub.getTransactionCount({ address: relayerAccount });
+
+    beforeAll(async () => {
+      const deploy = async ({ abi, bytecode }: { abi: Abi; bytecode: Hex }, args: unknown[]) => {
+        const hash = await wallet.deployContract({ abi, bytecode, args, account: owner });
+        return (await pub.waitForTransactionReceipt({ hash })).contractAddress!;
+      };
+      // The owner account stands in for Teleporter and for the contract on the other chain, so it can hand the
+      // mirror a root and the registry a receipt.
+      mirror = await deploy(artifact('RootMirror'), [owner, SOURCE, owner]);
+      await send(owner, mirror, artifact('RootMirror').abi, 'receiveTeleporterMessage', [SOURCE, owner, rootMessage(1n, fixture.root)]);
+      const verifier = await deploy(artifact('ClaimVerifier'), []);
+      l1Gate = await deploy(artifact('PointsGate'), [mirror, verifier]);
+      await send(owner, l1Gate, artifact('PointsGate').abi, 'addPerk', [1n, 500n, 'Priority event ticket']);
+      teleporter = await deploy(teleporterArtifact(), [DESTINATION]);
+      forwarder = await deploy(artifact('ClaimForwarder'), [l1Gate, teleporter, DESTINATION, owner]);
+      registry = await deploy(artifact('ClaimRegistry'), [owner, SOURCE, owner]);
+      // A second gate on this chain where neither fixture card has claimed yet: the tests above spent both on the first.
+      gate2 = await deploy(artifact('PointsGate'), [db, verifier]);
+      await send(owner, gate2, artifact('PointsGate').abi, 'addPerk', [1n, 500n, 'Priority event ticket']);
+      l1Chain = { ...chain, gate: gate2, l1: { name: 'school L1', chainId: 1, token: 'T', blockchainId: 'x', relay: owner, registry, fromBlock: 0n } };
+      l1Server = createServer(createApp({
+        chain: l1Chain, domains: [DOMAIN], secret: 's', prove: noProver, relayer,
+        l1: { rpcUrl: RPC, forwarder, relayer, relayerAddress: relayerAccount },
+      }));
+      await new Promise<void>((r) => l1Server.listen(0, '127.0.0.1', r));
+      l1Base = `http://127.0.0.1:${(l1Server.address() as AddressInfo).port}`;
+    }, 60_000);
+
+    afterAll(() => { l1Server?.close(); });
+
+    it('tells the page where a claim can go', async () => {
+      expect(await (await fetch(`${l1Base}/api/claims/targets`)).json()).toEqual({ fuji: true, l1: true });
+      expect(await (await fetch(`${base}/api/claims/targets`)).json()).toEqual({ fuji: true, l1: false });
+    });
+
+    it('keeps the hourly cap of the other relay, before doing any work for the request', async () => {
+      const never: SendTx = async () => { throw new Error('must not be reached'); };
+      const capped = createServer(createApp({ chain: l1Chain, domains: [DOMAIN], secret: 's', prove: noProver, relayer: never, relayPerHour: 0, l1: { rpcUrl: RPC, forwarder, relayer: never, relayerAddress: relayerAccount } }));
+      await new Promise<void>((r) => capped.listen(0, '127.0.0.1', r));
+      const res = await claimL1(0, {}, `http://127.0.0.1:${(capped.address() as AddressInfo).port}`);
+      expect(res.status).toBe(429);
+      expect((await res.json()).code).toBe('rate_limited');
+      capped.close();
+    });
+
+    it('refuses a page on another origin, like the other relay', async () => {
+      const res = await fetch(`${l1Base}/api/claims/relay-l1`, { method: 'POST', headers: { ...headers, Origin: 'http://evil.example' }, body: claimBody(0) });
+      expect(res.status).toBe(403);
+    });
+
+    it('relays one of two simultaneous requests for the same claim: the L1 gate records it once and one receipt leaves', async () => {
+      const results = await Promise.all([claimL1(0), claimL1(0)]);
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      const ok = results.find((r) => r.status === 200)!;
+      const { txHash, messageId } = await ok.json();
+      const receipt = await pub.getTransactionReceipt({ hash: txHash });
+      expect(receipt.from.toLowerCase()).toBe(relayerAccount.toLowerCase());
+      expect(receipt.to?.toLowerCase()).toBe(forwarder.toLowerCase());
+      expect(await claimedOn(l1Gate, 0)).toBe(true);
+      expect(await sentOverIcm()).toBe(1n);
+      expect(BigInt(messageId)).toBe(1n);
+    });
+
+    it('refuses the same card twice on the L1 and spends no gas on it', async () => {
+      const before = await relayerNonce();
+      const res = await claimL1(0);
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe('already_claimed');
+      expect(await relayerNonce()).toBe(before);
+    });
+
+    it('refuses on this chain a claim already made on the L1 (double spend across chains)', async () => {
+      // gate2 has never seen this nullifier, so the contract alone would accept it
+      expect(await claimedOn(gate2, 0)).toBe(false);
+      const before = await relayerNonce();
+      const res = await claimHere(0);
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe('claimed_elsewhere');
+      expect(await relayerNonce()).toBe(before);
+      expect(await claimedOn(gate2, 0)).toBe(false);
+    });
+
+    it('refuses on the L1 a claim already made on this chain (double spend across chains)', async () => {
+      expect((await claimHere(1)).status).toBe(200);
+      expect(await claimedOn(l1Gate, 1)).toBe(false);
+      const before = await relayerNonce();
+      const res = await claimL1(1);
+      expect(res.status).toBe(409);
+      expect((await res.json()).code).toBe('claimed_elsewhere');
+      expect(await relayerNonce()).toBe(before);
+      expect(await claimedOn(l1Gate, 1)).toBe(false);
+      expect(await sentOverIcm()).toBe(1n);
+    });
+
+    it('refuses on both paths a nullifier whose receipt from the L1 is already in ClaimRegistry', async () => {
+      const nullifier = `0x${'00'.repeat(31)}99` as Hex;
+      const receiptMessage = encodeAbiParameters(parseAbiParameters('uint256, bytes32, bytes32, uint64, bytes32, uint64'), [0n, nullifier, `0x00${'44'.repeat(31)}`, 500n, fixture.root, 1n]);
+      await send(owner, registry, artifact('ClaimRegistry').abi, 'receiveTeleporterMessage', [SOURCE, owner, receiptMessage]);
+      const here = await claimHere(1, { nullifier });
+      expect(here.status).toBe(409);
+      expect((await here.json()).code).toBe('claimed_elsewhere');
+      const there = await claimL1(1, { nullifier });
+      expect(there.status).toBe(409);
+      expect((await there.json()).code).toBe('already_claimed');
+    });
+
+    it('rejects malformed requests', async () => {
+      expect((await claimL1(1, { pickup: '0x12' })).status).toBe(400);
+      expect((await claimL1(1, { proof: 'nope' })).status).toBe(400);
+      expect((await claimL1(1, { perkId: -1 })).status).toBe(400);
+    });
+
+    it('relays nothing to the L1 while it holds another root than the ledger, and says which', async () => {
+      // the mirror moves to a batch the ledger on this chain does not have: the two no longer agree
+      await send(owner, mirror, artifact('RootMirror').abi, 'receiveTeleporterMessage', [SOURCE, owner, rootMessage(2n, `0x${'00'.repeat(31)}07`)]);
+      const before = await relayerNonce();
+      const res = await claimL1(1, { nullifier: `0x${'00'.repeat(31)}55` });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.code).toBe('l1_root_behind');
+      expect(body.error).toMatch(/holds #2, the ledger is at #1/);
+      expect(await relayerNonce()).toBe(before);
+      // the gate on this chain reads the ledger's own root, so it still relays as before
+      const here = await claimHere(0, { nullifier: `0x${'00'.repeat(31)}56` });
+      expect((await here.json()).code).toBe('invalid_proof');
+    });
+
+    it('fails closed when the L1 cannot be read', async () => {
+      const blind = createServer(createApp({ chain: l1Chain, domains: [DOMAIN], secret: 's', prove: noProver, relayer, l1: { rpcUrl: 'http://127.0.0.1:9', forwarder, relayer, relayerAddress: relayerAccount } }));
+      await new Promise<void>((r) => blind.listen(0, '127.0.0.1', r));
+      const at = `http://127.0.0.1:${(blind.address() as AddressInfo).port}`;
+      const before = await relayerNonce();
+      const there = await claimL1(1, {}, at);
+      expect(there.status).toBe(503);
+      expect((await there.json()).code).toBe('check_failed');
+      const here = await fetch(`${at}/api/claims/relay`, { method: 'POST', headers, body: claimBody(1, { nullifier: `0x${'00'.repeat(31)}57` }) });
+      expect(here.status).toBe(503);
+      expect(await relayerNonce()).toBe(before);
+      blind.close();
+    }, 30_000);
+
+    it('does not relay to the L1 when no L1 relayer is configured', async () => {
+      const res = await claimL1(1, {}, base);
+      expect(res.status).toBe(503);
+      expect((await res.json()).code).toBe('no_l1_relayer');
+    });
   });
 
   // --- demo accounts: a signer on localhost has to refuse everyone but the dashboard page ---
